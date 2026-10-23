@@ -1,7 +1,9 @@
-opencv-python
-pytesseract
-Pillow
-yt-dlp
-scikit-image  # Correct package name
-tk
-reportlab
+customtkinter>=5.2,<6
+faster-whisper>=1.2,<2
+imageio-ffmpeg>=0.6,<1
+img2pdf>=0.5,<1
+numpy>=1.26,<3
+opencv-python-headless>=4.10,<5
+Pillow>=10,<13
+yt-dlp[default,deno]>=2026.8.19
+youtube-transcript-api>=1.2,<2

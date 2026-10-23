@@ -1,4 +1,15 @@
 __pycache__/
+.DS_Store
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.venv/
+slides/
+build/
+dist/
+.pyinstaller-cache/
+assets/SlideFlow.iconset/
 *.pyc
 *.pyo
 .idea/
@@ -6,3 +17,5 @@ __pycache__/
 *.log
 *.db
 *.env
+.env.*
+!.env.example

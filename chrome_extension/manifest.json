@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "SlideFlow — Gửi video",
+  "version": "1.0.0",
+  "description": "Gửi video hoặc playlist YouTube hiện tại vào hàng chờ SlideFlow.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmF7uNFKob83CabChSs4e2RvpYtrHhBWPFwTuHBhhD1YEFsFrSx7GsTY3hWHIzBY0AyGAcu3HhqeEN21H2N40Oemu68fKYHaxM1IUZ1eoQzSGk4yew2eL2bkR0S9QjAfjT/D5sGJzfMRySulWp4hPIr6wJqQeZiISJVPZB/6N82CBjofOuQPrLVMSd5aSrN53Im4Nf2sn80kCV8F9lHmtZYlptgQj6n4wHByiIDayr9107yt8Bew3PW6EpeJo3hLJ9e6ji6iKuxTEF5Nt8ElLjE5hIMab6Dl7zu3M64B8pKIgGmpLCTL0rUfi0wbDJEZG/Y3fFetgH6tBgSLR+wU0jQIDAQAB",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Gửi vào SlideFlow",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  }
+}
