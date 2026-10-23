@@ -1,6 +1,6 @@
 # SlideFlow
 
-Hoàn toàn làm bằng AI. Thông cảm !
+Hoàn toàn làm bằng AI. Thông cảm ! </br>
 SlideFlow is an open-source macOS app that turns YouTube lectures into slide PDFs
 and text transcripts. Processing is performed locally whenever possible: temporary
 video/audio data is deleted after a successful run, and Whisper models remain on
