@@ -154,14 +154,29 @@ inputs, and 6px for small tags.
 
 ## Components
 
-- **Toolbar:** paste (secondary), URL field, transcript actions (ghost), and
-  "Tạo slide" (primary), in that order.
+- **Layout:** a 300px sidebar (`topbar` background) holds every setting, and
+  the main column holds the task. Settings never share a row with the
+  primary action.
+- **Sidebar:** each setting is a titled group. Options with three or four
+  values use a segmented control (`input` track, `surface-pressed`
+  selection) so every choice is visible. Longer lists use a dropdown. The
+  save location, quick links and privacy note sit at the bottom under a
+  divider.
+- **Hero:** a 26px title, a one-line explanation, a 52px URL field,
+  "Dán" (secondary) and "Tạo slide" (primary), then the transcript actions
+  as small ghost buttons.
 - **Status card:** the badge glyph and color follow `STATUS_TONES`:
   `▶` idle, `●` running, `✓` success, `!` error, `■` stopped. Set the tone
   through `set_tone()` and the progress through `set_progress()`. Do not call
   the widgets directly.
-- **History rows:** a neutral `PDF` file tag, the title, a muted timestamp,
-  and a secondary "Mở PDF" button.
+- **Status card at idle:** shows three numbered onboarding steps in place of
+  an empty progress bar, and hides "Dừng". The progress bar takes over once
+  the first job starts.
+- **History rows:** an undivided list with hairline separators. Each row
+  has a `PDF` tag, the title, a relative time ("Hôm nay", "Hôm qua",
+  "N ngày trước"), a ghost "Thư mục" button and a secondary "Mở PDF"
+  button. The whole row highlights to `panel` on hover and opens the PDF
+  when clicked.
 - **Queue rows:** a numbered badge. Only the running item uses the accent
   pair.
 

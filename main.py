@@ -63,6 +63,8 @@ class SlideFlowApp(ctk.CTk):
         "stopped": ("■", "SURFACE", "MUTED"),
     }
     # Short ease-out transitions only; see "Motion" in DESIGN.md.
+    SIDEBAR_WIDTH = 300
+    SIDEBAR_PAD = 22
     PROGRESS_ANIMATION_MS = 240
     PROGRESS_ANIMATION_MIN_STEP = 0.02
     ANIMATION_FRAME_MS = 16
@@ -77,6 +79,12 @@ class SlideFlowApp(ctk.CTk):
         "Cân bằng": (7, 0.92),
         "Chi tiết": (4, 0.96),
     }
+    PRESET_HINTS = {
+        "Nhanh": "Lấy mẫu mỗi 15 giây • nhanh nhất, có thể bỏ sót slide ngắn.",
+        "Cân bằng": "Lấy mẫu mỗi 7 giây • phù hợp hầu hết bài giảng.",
+        "Chi tiết": "Lấy mẫu mỗi 4 giây • bắt được slide đổi nhanh, chạy lâu hơn.",
+        "Tùy chỉnh": "Tự chọn khoảng lấy mẫu và độ nhạy bên dưới.",
+    }
     COOKIE_BROWSER_OPTIONS = {
         "Chrome": "chrome",
         "Safari": "safari",
@@ -87,8 +95,8 @@ class SlideFlowApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("SlideFlow")
-        self.geometry("1080x720")
-        self.minsize(920, 640)
+        self.geometry("1180x780")
+        self.minsize(1000, 740)
         self.configure(fg_color=self.BG)
         self.cancel_event = threading.Event()
         self.result: ExtractionResult | None = None
@@ -145,18 +153,58 @@ class SlideFlowApp(ctk.CTk):
         return base / relative_path
 
     def build_ui(self) -> None:
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(4, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self.build_sidebar()
 
-        # A compact command bar keeps the primary action visible, following
-        # the desktop-utility pattern used by mature download managers.
-        toolbar = ctk.CTkFrame(self, corner_radius=0, height=76, fg_color=self.TOPBAR)
-        toolbar.grid(row=0, column=0, sticky="ew")
-        toolbar.grid_columnconfigure(2, weight=1)
-        toolbar.grid_propagate(False)
+        # The main column leads with one task: paste a link and start.
+        main = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
+        main.grid(row=0, column=1, sticky="nsew")
+        main.grid_columnconfigure(0, weight=1)
+        main.grid_rowconfigure(1, weight=1)
+        self.build_hero(main)
 
-        brand = ctk.CTkFrame(toolbar, fg_color="transparent")
-        brand.grid(row=0, column=0, padx=(22, 20), pady=14, sticky="w")
+        body = ctk.CTkScrollableFrame(
+            main,
+            fg_color="transparent",
+            corner_radius=0,
+            scrollbar_button_color=self.SCROLLBAR,
+            scrollbar_button_hover_color=self.SCROLLBAR_HOVER,
+        )
+        body.grid(row=1, column=0, sticky="nsew", padx=(28, 16), pady=(0, 16))
+        body.grid_columnconfigure(0, weight=1)
+        self.body = body
+        # Keep canvas positioning fine-grained.  Pointer input is converted to
+        # pixels below so a short trackpad gesture is not lost to unit rounding.
+        self.body._parent_canvas.configure(yscrollincrement=1)
+
+        self.build_status_card(body)
+
+        self.queue_card = self.card(body)
+        self.queue_card.grid(row=1, column=0, sticky="ew", pady=(0, 14))
+        self.queue_card.grid_columnconfigure(0, weight=1)
+        self.queue_card.grid_remove()
+
+        self.result_card = self.card(body)
+        self.result_card.grid(row=2, column=0, sticky="ew", pady=(0, 14))
+        self.result_card.grid_columnconfigure(0, weight=1)
+        self.result_card.grid_remove()
+
+        self.history_card = self.card(body)
+        self.history_card.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        self.history_card.grid_columnconfigure(0, weight=1)
+        self.refresh_history_card()
+
+    def build_sidebar(self) -> None:
+        sidebar = ctk.CTkFrame(self, width=self.SIDEBAR_WIDTH, corner_radius=0, fg_color=self.TOPBAR)
+        sidebar.grid(row=0, column=0, sticky="nsw")
+        sidebar.grid_propagate(False)
+        sidebar.grid_columnconfigure(0, weight=1)
+        sidebar.grid_rowconfigure(6, weight=1)
+        inner_width = self.SIDEBAR_WIDTH - 2 * self.SIDEBAR_PAD
+
+        brand = ctk.CTkFrame(sidebar, fg_color="transparent")
+        brand.grid(row=0, column=0, sticky="ew", padx=self.SIDEBAR_PAD, pady=(18, 12))
         ctk.CTkLabel(
             brand,
             text="",
@@ -173,199 +221,47 @@ class SlideFlowApp(ctk.CTk):
         ).grid(row=0, column=1, sticky="sw")
         ctk.CTkLabel(
             brand,
-            text="VIDEO  →  SLIDE",
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=10, weight="bold"),
-        ).grid(row=1, column=1, sticky="nw")
-
-        # Only "Tạo slide" is filled with the accent; every other toolbar
-        # control is secondary or ghost so the primary action reads first.
-        ctk.CTkButton(
-            toolbar,
-            text="＋  Dán liên kết",
-            width=138,
-            height=44,
-            corner_radius=9,
-            fg_color=self.SURFACE,
-            hover_color=self.SURFACE_HOVER,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self.paste_url,
-        ).grid(row=0, column=1, padx=(0, 10), pady=16)
-
-        self.url_entry = ctk.CTkEntry(
-            toolbar,
-            height=44,
-            corner_radius=9,
-            border_width=1,
-            border_color=self.BORDER,
-            fg_color=self.INPUT_BG,
-            text_color=self.TEXT,
-            placeholder_text="Dán liên kết YouTube…",
-            placeholder_text_color=self.PLACEHOLDER,
-            font=ctk.CTkFont(size=14),
-        )
-        self.url_entry.grid(row=0, column=2, sticky="ew", padx=(0, 10), pady=16)
-
-        self.script_button = ctk.CTkButton(
-            toolbar,
-            text="Lấy script",
-            width=104,
-            height=44,
-            corner_radius=9,
-            fg_color="transparent",
-            hover_color=self.SURFACE,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=13),
-            command=self.start_transcripts,
-        )
-        self.script_button.grid(row=0, column=3, padx=(0, 8), pady=16)
-
-        self.audio_script_button = ctk.CTkButton(
-            toolbar,
-            text="Chép từ âm thanh",
-            width=140,
-            height=44,
-            corner_radius=9,
-            fg_color="transparent",
-            hover_color=self.SURFACE,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=13),
-            command=lambda: self.start_transcripts(audio=True),
-        )
-        self.audio_script_button.grid(row=0, column=4, padx=(0, 8), pady=16)
-
-        self.start_button = ctk.CTkButton(
-            toolbar,
-            text="Tạo slide",
-            width=124,
-            height=44,
-            corner_radius=9,
-            fg_color=self.ORANGE,
-            hover_color=self.ORANGE_HOVER,
-            text_color=self.ON_ACCENT,
-            font=ctk.CTkFont(size=14, weight="bold"),
-            command=self.start_extraction,
-        )
-        self.start_button.grid(row=0, column=5, padx=(0, 22), pady=16)
-
-        settings_bar = ctk.CTkFrame(
-            self,
-            corner_radius=0,
-            height=94,
-            fg_color=self.TOPBAR,
-            border_width=0,
-        )
-        settings_bar.grid(row=1, column=0, sticky="ew")
-        settings_bar.grid_columnconfigure(4, weight=1)
-        settings_bar.grid_propagate(False)
-
-        self.preset = self.setting_menu(
-            settings_bar,
-            0,
-            "MỨC CHI TIẾT",
-            self.preset_var,
-            [*self.PROCESSING_PRESETS, "Tùy chỉnh"],
-            148,
-        )
-        self.preset.configure(command=self.on_preset_change)
-        self.quality = self.setting_menu(
-            settings_bar, 1, "CHẤT LƯỢNG", self.quality_var, ["480p", "720p", "1080p"], 132
-        )
-        self.cookie_browser_menu = self.setting_menu(
-            settings_bar, 2, "XÁC THỰC", self.cookie_browser_var, list(self.COOKIE_BROWSER_OPTIONS), 132
-        )
-
-        transcript_box = ctk.CTkFrame(settings_bar, fg_color="transparent")
-        transcript_box.grid(row=0, column=3, padx=(18, 16), pady=(8, 12), sticky="w")
-        ctk.CTkLabel(
-            transcript_box,
-            text="PHỤ ĐỀ",
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=10, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", pady=(0, 5))
-        self.transcript_check = ctk.CTkSwitch(
-            transcript_box,
-            text="Kèm slide nếu có",
-            variable=self.transcript_var,
-            width=112,
-            progress_color=self.ORANGE,
-            button_color=self.KNOB,
-            button_hover_color=self.KNOB_HOVER,
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=12),
-        )
-        self.transcript_check.grid(row=1, column=0, sticky="w")
-
-        save_box = ctk.CTkFrame(settings_bar, fg_color="transparent")
-        save_box.grid(row=0, column=4, padx=(8, 22), pady=(8, 12), sticky="e")
-        ctk.CTkLabel(
-            save_box,
-            text="LƯU VÀO",
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=10, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", pady=(0, 5))
-        self.output_button = ctk.CTkButton(
-            save_box,
-            text="",
-            width=220,
-            height=34,
-            corner_radius=8,
-            fg_color=self.SURFACE,
-            hover_color=self.SURFACE_HOVER,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.TEXT,
-            anchor="w",
-            command=self.choose_output,
-        )
-        self.output_button.grid(row=1, column=0, sticky="ew")
-        self.refresh_output_button()
-
-        self.custom_panel = ctk.CTkFrame(
-            self,
-            corner_radius=0,
-            height=92,
-            fg_color=self.PANEL,
-            border_width=0,
-        )
-        self.custom_panel.grid(row=2, column=0, sticky="ew")
-        self.custom_panel.grid_columnconfigure((1, 2), weight=1)
-        self.custom_panel.grid_propagate(False)
-
-        custom_intro = ctk.CTkFrame(self.custom_panel, fg_color="transparent")
-        custom_intro.grid(row=0, column=0, padx=(22, 24), pady=(8, 10), sticky="w")
-        ctk.CTkLabel(
-            custom_intro,
-            text="Tùy chỉnh",
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=13, weight="bold"),
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            custom_intro,
-            text="Tinh chỉnh để ưu tiên tốc độ hoặc độ nhạy",
+            text="Bài giảng YouTube → slide PDF",
             text_color=self.MUTED,
             font=ctk.CTkFont(size=11),
-        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+        ).grid(row=1, column=1, sticky="nw")
 
-        interval_box = ctk.CTkFrame(self.custom_panel, fg_color="transparent")
-        interval_box.grid(row=0, column=1, padx=(0, 28), pady=(8, 12), sticky="ew")
-        interval_box.grid_columnconfigure(0, weight=1)
+        preset_group = self.sidebar_group(sidebar, 1, "Mức chi tiết")
+        self.preset = ctk.CTkSegmentedButton(
+            preset_group,
+            values=[*self.PROCESSING_PRESETS, "Tùy chỉnh"],
+            variable=self.preset_var,
+            width=inner_width,
+            height=34,
+            corner_radius=8,
+            font=ctk.CTkFont(size=12),
+            command=self.on_preset_change,
+            **self.segmented_colors(),
+        )
+        self.preset.grid(row=1, column=0, sticky="ew")
+        self.preset_hint = ctk.CTkLabel(
+            preset_group,
+            text=self.PRESET_HINTS[self.preset_var.get()],
+            text_color=self.MUTED,
+            font=ctk.CTkFont(size=11),
+            justify="left",
+            anchor="w",
+            wraplength=inner_width,
+        )
+        self.preset_hint.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+
+        self.custom_panel = ctk.CTkFrame(preset_group, fg_color=self.PANEL, corner_radius=10)
+        self.custom_panel.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        self.custom_panel.grid_columnconfigure(0, weight=1)
         self.custom_interval_label = ctk.CTkLabel(
-            interval_box,
+            self.custom_panel,
             text="Khoảng lấy mẫu  •  7 giây",
             text_color=self.TEXT,
             font=ctk.CTkFont(size=11, weight="bold"),
         )
-        self.custom_interval_label.grid(row=0, column=0, sticky="w")
+        self.custom_interval_label.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 0))
         self.custom_interval_slider = ctk.CTkSlider(
-            interval_box,
+            self.custom_panel,
             from_=2,
             to=60,
             number_of_steps=58,
@@ -378,20 +274,17 @@ class SlideFlowApp(ctk.CTk):
             button_hover_color=self.KNOB_HOVER,
             command=self.update_custom_labels,
         )
-        self.custom_interval_slider.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-
-        threshold_box = ctk.CTkFrame(self.custom_panel, fg_color="transparent")
-        threshold_box.grid(row=0, column=2, padx=(0, 24), pady=(8, 12), sticky="ew")
-        threshold_box.grid_columnconfigure(0, weight=1)
+        self.custom_interval_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=12, pady=(6, 0))
         self.custom_threshold_label = ctk.CTkLabel(
-            threshold_box,
+            self.custom_panel,
             text="Độ nhạy thay đổi  •  92%",
             text_color=self.TEXT,
             font=ctk.CTkFont(size=11, weight="bold"),
         )
-        self.custom_threshold_label.grid(row=0, column=0, sticky="w")
+        self.custom_threshold_label.grid(row=2, column=0, sticky="w", padx=12, pady=(10, 0))
+        self.custom_panel.grid_columnconfigure(1, weight=0)
         self.custom_threshold_slider = ctk.CTkSlider(
-            threshold_box,
+            self.custom_panel,
             from_=0.75,
             to=0.99,
             number_of_steps=24,
@@ -404,210 +297,43 @@ class SlideFlowApp(ctk.CTk):
             button_hover_color=self.KNOB_HOVER,
             command=self.update_custom_labels,
         )
-        self.custom_threshold_slider.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-
+        self.custom_threshold_slider.grid(row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(6, 12))
         self.custom_reset_button = ctk.CTkButton(
             self.custom_panel,
             text="Đặt lại",
-            width=76,
-            height=32,
-            corner_radius=8,
+            width=64,
+            height=24,
+            corner_radius=7,
             fg_color="transparent",
             hover_color=self.SURFACE_HOVER,
             border_width=1,
             border_color=self.BORDER,
             text_color=self.MUTED,
+            font=ctk.CTkFont(size=11),
             command=self.reset_custom_settings,
         )
-        self.custom_reset_button.grid(row=0, column=3, padx=(0, 22), pady=(24, 26))
+        self.custom_reset_button.grid(row=2, column=1, sticky="e", padx=(0, 10), pady=(8, 0))
         self.custom_panel.grid_remove()
 
-        navigation = ctk.CTkFrame(self, corner_radius=0, height=50, fg_color=self.BG)
-        navigation.grid(row=3, column=0, sticky="ew", padx=22)
-        navigation.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            navigation,
-            text="TIẾN TRÌNH",
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=12, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", pady=(18, 10))
-        quick_actions = ctk.CTkFrame(navigation, fg_color="transparent")
-        quick_actions.grid(row=0, column=1, sticky="e", pady=(10, 4))
-        ctk.CTkButton(
-            quick_actions,
-            text="Mở PDF gần nhất",
-            width=132,
-            height=30,
-            corner_radius=7,
-            fg_color="transparent",
-            hover_color=self.SURFACE,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.MUTED,
-            command=self.open_latest_pdf,
-        ).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(
-            quick_actions,
-            text="Mở thư mục",
-            width=108,
-            height=30,
-            corner_radius=7,
-            fg_color="transparent",
-            hover_color=self.SURFACE,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.MUTED,
-            command=self.open_output_folder,
-        ).grid(row=0, column=1)
-
-        body = ctk.CTkScrollableFrame(
-            self,
-            fg_color="transparent",
-            corner_radius=0,
-            scrollbar_button_color=self.SCROLLBAR,
-            scrollbar_button_hover_color=self.SCROLLBAR_HOVER,
-        )
-        body.grid(row=4, column=0, sticky="nsew", padx=22, pady=(0, 10))
-        body.grid_columnconfigure(0, weight=1)
-        self.body = body
-        # Keep canvas positioning fine-grained.  Pointer input is converted to
-        # pixels below so a short trackpad gesture is not lost to unit rounding.
-        self.body._parent_canvas.configure(yscrollincrement=1)
-
-        self.action_card = self.card(body)
-        self.action_card.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        self.action_card.grid_columnconfigure(1, weight=1)
-        self.status_icon = ctk.CTkLabel(
-            self.action_card,
-            text="▶",
-            width=54,
-            height=54,
-            corner_radius=12,
-            fg_color=self.ACCENT_SOFT,
-            text_color=self.ACCENT_TEXT,
-            font=ctk.CTkFont(size=20, weight="bold"),
-        )
-        self.status_icon.grid(row=0, column=0, rowspan=3, padx=(22, 16), pady=22, sticky="n")
-        self.status_label = ctk.CTkLabel(
-            self.action_card,
-            text="Sẵn sàng",
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=18, weight="bold"),
-        )
-        self.status_label.grid(row=0, column=1, padx=(0, 16), pady=(22, 2), sticky="w")
-        self.status_detail = ctk.CTkLabel(
-            self.action_card,
-            text="Dán một liên kết YouTube ở thanh trên để bắt đầu.",
-            text_color=self.MUTED,
-            justify="left",
-            anchor="w",
-        )
-        self.status_detail.grid(row=1, column=1, padx=(0, 16), pady=(0, 13), sticky="ew")
-        self.progress_bar = ctk.CTkProgressBar(
-            self.action_card,
-            height=8,
-            corner_radius=4,
-            progress_color=self.ORANGE,
-            fg_color=self.TRACK,
-        )
-        self.progress_bar.grid(row=2, column=1, sticky="ew", padx=(0, 16), pady=(0, 22))
-        self.progress_bar.set(0)
-        self.cancel_button = ctk.CTkButton(
-            self.action_card,
-            text="Dừng",
-            width=86,
-            height=36,
+        quality_group = self.sidebar_group(sidebar, 2, "Chất lượng video")
+        self.quality = ctk.CTkSegmentedButton(
+            quality_group,
+            values=["480p", "720p", "1080p"],
+            variable=self.quality_var,
+            width=inner_width,
+            height=34,
             corner_radius=8,
-            fg_color=self.SURFACE,
-            hover_color=self.SURFACE_HOVER,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.MUTED,
-            state="disabled",
-            command=self.cancel_extraction,
-        )
-        self.cancel_button.grid(row=0, column=2, rowspan=3, padx=(0, 22), pady=22)
-
-        self.queue_card = self.card(body)
-        self.queue_card.grid(row=1, column=0, sticky="ew", pady=(0, 12))
-        self.queue_card.grid_columnconfigure(0, weight=1)
-        self.queue_card.grid_remove()
-
-        self.result_card = self.card(body)
-        self.result_card.grid(row=2, column=0, sticky="ew", pady=(0, 12))
-        self.result_card.grid_columnconfigure(0, weight=1)
-        self.result_card.grid_remove()
-
-        self.history_card = self.card(body)
-        self.history_card.grid(row=3, column=0, sticky="ew", pady=(0, 12))
-        self.history_card.grid_columnconfigure(0, weight=1)
-        self.refresh_history_card()
-
-        privacy_card = ctk.CTkFrame(
-            body,
-            fg_color=self.TOPBAR,
-            corner_radius=12,
-            border_width=1,
-            border_color=self.SURFACE_HOVER,
-        )
-        privacy_card.grid(row=4, column=0, sticky="ew", pady=(0, 8))
-        privacy_card.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
-            privacy_card,
-            text="✓",
-            width=28,
-            height=28,
-            corner_radius=14,
-            fg_color=self.ACCENT_SOFT,
-            text_color=self.ACCENT_TEXT,
-            font=ctk.CTkFont(size=13, weight="bold"),
-        ).grid(row=0, column=0, padx=(16, 10), pady=14)
-        ctk.CTkLabel(
-            privacy_card,
-            text=(
-                "Xử lý trực tuyến, không lưu video đầy đủ  •  "
-                "Cookie chỉ được đọc khi YouTube yêu cầu xác thực và không được xuất ra tệp"
-            ),
-            text_color=self.MUTED,
             font=ctk.CTkFont(size=12),
-        ).grid(row=0, column=1, sticky="w", pady=14)
-
-        footer = ctk.CTkFrame(self, corner_radius=0, height=30, fg_color=self.INPUT_BG)
-        footer.grid(row=5, column=0, sticky="ew")
-        footer.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            footer,
-            text="ONLINE • RIÊNG TƯ",
-            text_color=self.FAINT,
-            font=ctk.CTkFont(size=10, weight="bold"),
-        ).grid(row=0, column=0, padx=22, pady=7, sticky="w")
-        ctk.CTkLabel(
-            footer,
-            text="Enter để bắt đầu  •  Esc để dừng",
-            text_color=self.FAINT,
-            font=ctk.CTkFont(size=10),
-        ).grid(row=0, column=1, padx=22, pady=7, sticky="e")
-
-    def setting_menu(self, parent, column: int, title: str, variable, values: list[str], width: int):
-        box = ctk.CTkFrame(parent, fg_color="transparent")
-        box.grid(
-            row=0,
-            column=column,
-            padx=(22 if column == 0 else 8, 8),
-            pady=(8, 12),
-            sticky="w",
+            **self.segmented_colors(),
         )
-        ctk.CTkLabel(
-            box,
-            text=title,
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=10, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", pady=(0, 5))
-        menu = ctk.CTkOptionMenu(
-            box,
-            values=values,
-            variable=variable,
-            width=width,
+        self.quality.grid(row=1, column=0, sticky="ew")
+
+        auth_group = self.sidebar_group(sidebar, 3, "Đăng nhập YouTube", "khi video giới hạn tuổi")
+        self.cookie_browser_menu = ctk.CTkOptionMenu(
+            auth_group,
+            values=list(self.COOKIE_BROWSER_OPTIONS),
+            variable=self.cookie_browser_var,
+            width=inner_width,
             height=34,
             corner_radius=8,
             fg_color=self.SURFACE,
@@ -618,17 +344,310 @@ class SlideFlowApp(ctk.CTk):
             dropdown_hover_color=self.SURFACE_HOVER,
             dropdown_text_color=self.TEXT,
         )
-        menu.grid(row=1, column=0, sticky="w")
-        return menu
+        self.cookie_browser_menu.grid(row=1, column=0, sticky="ew")
+
+        transcript_group = self.sidebar_group(sidebar, 4, "Phụ đề")
+        self.transcript_check = ctk.CTkSwitch(
+            transcript_group,
+            text="Lưu kèm script nếu có",
+            variable=self.transcript_var,
+            progress_color=self.ORANGE,
+            button_color=self.KNOB,
+            button_hover_color=self.KNOB_HOVER,
+            fg_color=self.TRACK,
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=12),
+        )
+        self.transcript_check.grid(row=1, column=0, sticky="w")
+
+        save_group = ctk.CTkFrame(sidebar, fg_color="transparent")
+        save_group.grid(row=7, column=0, sticky="sew", padx=self.SIDEBAR_PAD, pady=(0, 14))
+        save_group.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkFrame(save_group, height=1, fg_color=self.SURFACE_HOVER).grid(
+            row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10)
+        )
+        ctk.CTkLabel(
+            save_group,
+            text="Lưu vào",
+            text_color=self.MUTED,
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        self.output_button = ctk.CTkButton(
+            save_group,
+            text="",
+            height=36,
+            corner_radius=8,
+            fg_color=self.SURFACE,
+            hover_color=self.SURFACE_HOVER,
+            border_width=1,
+            border_color=self.BORDER,
+            text_color=self.TEXT,
+            anchor="w",
+            command=self.choose_output,
+        )
+        self.output_button.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.refresh_output_button()
+        for column, (text, command) in enumerate((
+            ("PDF gần nhất", self.open_latest_pdf),
+            ("Mở thư mục", self.open_output_folder),
+        )):
+            ctk.CTkButton(
+                save_group,
+                text=text,
+                height=30,
+                corner_radius=7,
+                fg_color="transparent",
+                hover_color=self.SURFACE,
+                text_color=self.MUTED,
+                font=ctk.CTkFont(size=12),
+                command=command,
+            ).grid(row=3, column=column, sticky="ew", padx=(0, 4) if column == 0 else (4, 0), pady=(8, 0))
+        ctk.CTkLabel(
+            save_group,
+            text="✓  Xử lý trực tuyến, không lưu video đầy đủ",
+            text_color=self.FAINT,
+            font=ctk.CTkFont(size=11),
+            anchor="w",
+        ).grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+
+    def sidebar_group(self, sidebar, row: int, title: str, note: str = "") -> ctk.CTkFrame:
+        group = ctk.CTkFrame(sidebar, fg_color="transparent")
+        group.grid(row=row, column=0, sticky="ew", padx=self.SIDEBAR_PAD, pady=(0, 14))
+        group.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            group,
+            text=title,
+            text_color=self.MUTED,
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        if note:
+            ctk.CTkLabel(
+                group,
+                text=note,
+                text_color=self.FAINT,
+                font=ctk.CTkFont(size=11),
+            ).grid(row=0, column=0, sticky="e", pady=(0, 6))
+        return group
+
+    def segmented_colors(self) -> dict:
+        return {
+            "fg_color": self.INPUT_BG,
+            "selected_color": self.SURFACE_PRESSED,
+            "selected_hover_color": self.SURFACE_PRESSED,
+            "unselected_color": self.INPUT_BG,
+            "unselected_hover_color": self.SURFACE,
+            "text_color": self.TEXT,
+            "text_color_disabled": self.FAINT,
+        }
+
+    def build_hero(self, main) -> None:
+        hero = ctk.CTkFrame(main, fg_color="transparent")
+        hero.grid(row=0, column=0, sticky="ew", padx=(28, 32), pady=(30, 20))
+        hero.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            hero,
+            text="Biến bài giảng YouTube thành slide",
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=26, weight="bold"),
+            anchor="w",
+        ).grid(row=0, column=0, columnspan=3, sticky="ew")
+        ctk.CTkLabel(
+            hero,
+            text="Dán liên kết video hoặc playlist. SlideFlow chỉ giữ những khung hình có nội dung mới.",
+            text_color=self.MUTED,
+            font=ctk.CTkFont(size=13),
+            anchor="w",
+        ).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(4, 16))
+
+        self.url_entry = ctk.CTkEntry(
+            hero,
+            height=52,
+            corner_radius=10,
+            border_width=1,
+            border_color=self.BORDER,
+            fg_color=self.INPUT_BG,
+            text_color=self.TEXT,
+            placeholder_text="https://www.youtube.com/watch?v=…",
+            placeholder_text_color=self.PLACEHOLDER,
+            font=ctk.CTkFont(size=15),
+        )
+        self.url_entry.grid(row=2, column=0, sticky="ew", padx=(0, 10))
+        ctk.CTkButton(
+            hero,
+            text="Dán",
+            width=72,
+            height=52,
+            corner_radius=10,
+            fg_color=self.SURFACE,
+            hover_color=self.SURFACE_HOVER,
+            border_width=1,
+            border_color=self.BORDER,
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=14),
+            command=self.paste_url,
+        ).grid(row=2, column=1, padx=(0, 10))
+        self.start_button = ctk.CTkButton(
+            hero,
+            text="Tạo slide",
+            width=150,
+            height=52,
+            corner_radius=10,
+            fg_color=self.ORANGE,
+            hover_color=self.ORANGE_HOVER,
+            text_color=self.ON_ACCENT,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            command=self.start_extraction,
+        )
+        self.start_button.grid(row=2, column=2)
+
+        extras = ctk.CTkFrame(hero, fg_color="transparent")
+        extras.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        extras.grid_columnconfigure(3, weight=1)
+        ctk.CTkLabel(
+            extras,
+            text="Chỉ cần lời giảng?",
+            text_color=self.MUTED,
+            font=ctk.CTkFont(size=12),
+        ).grid(row=0, column=0, padx=(0, 10))
+        self.script_button = ctk.CTkButton(
+            extras,
+            text="Lấy phụ đề",
+            width=96,
+            height=30,
+            corner_radius=8,
+            fg_color="transparent",
+            hover_color=self.SURFACE,
+            border_width=1,
+            border_color=self.BORDER,
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=12),
+            command=self.start_transcripts,
+        )
+        self.script_button.grid(row=0, column=1, padx=(0, 8))
+        self.audio_script_button = ctk.CTkButton(
+            extras,
+            text="Chép từ âm thanh",
+            width=128,
+            height=30,
+            corner_radius=8,
+            fg_color="transparent",
+            hover_color=self.SURFACE,
+            border_width=1,
+            border_color=self.BORDER,
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=12),
+            command=lambda: self.start_transcripts(audio=True),
+        )
+        self.audio_script_button.grid(row=0, column=2)
+        ctk.CTkLabel(
+            extras,
+            text="Enter để bắt đầu  ·  Esc để dừng",
+            text_color=self.FAINT,
+            font=ctk.CTkFont(size=11),
+        ).grid(row=0, column=4, sticky="e")
+
+    def build_status_card(self, body) -> None:
+        self.action_card = self.card(body)
+        self.action_card.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        self.action_card.grid_columnconfigure(1, weight=1)
+        self.status_icon = ctk.CTkLabel(
+            self.action_card,
+            text="▶",
+            width=48,
+            height=48,
+            corner_radius=12,
+            fg_color=self.ACCENT_SOFT,
+            text_color=self.ACCENT_TEXT,
+            font=ctk.CTkFont(size=18, weight="bold"),
+        )
+        self.status_icon.grid(row=0, column=0, rowspan=2, padx=(22, 16), pady=(20, 0), sticky="n")
+        self.status_label = ctk.CTkLabel(
+            self.action_card,
+            text="Sẵn sàng",
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=17, weight="bold"),
+            anchor="w",
+        )
+        self.status_label.grid(row=0, column=1, padx=(0, 16), pady=(20, 0), sticky="ew")
+        self.status_detail = ctk.CTkLabel(
+            self.action_card,
+            text="Ba bước là xong — thiết lập ở cột trái đã có sẵn giá trị khuyên dùng.",
+            text_color=self.MUTED,
+            justify="left",
+            anchor="w",
+        )
+        self.status_detail.grid(row=1, column=1, padx=(0, 16), pady=(2, 0), sticky="ew")
+        self.cancel_button = ctk.CTkButton(
+            self.action_card,
+            text="Dừng",
+            width=96,
+            height=34,
+            corner_radius=8,
+            fg_color=self.SURFACE,
+            hover_color=self.SURFACE_HOVER,
+            border_width=1,
+            border_color=self.BORDER,
+            text_color=self.TEXT,
+            state="disabled",
+            command=self.cancel_extraction,
+        )
+        self.cancel_button.grid(row=0, column=2, rowspan=2, padx=(0, 22), pady=(20, 0))
+        self.cancel_button.grid_remove()
+
+        # Idle state shows how to start; the progress bar takes this slot once
+        # the first job runs, so an empty bar never reads as a stalled job.
+        self.onboarding_steps = ctk.CTkFrame(self.action_card, fg_color="transparent")
+        self.onboarding_steps.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(0, 22), pady=(14, 20))
+        self.onboarding_steps.grid_columnconfigure((0, 1, 2), weight=1, uniform="step")
+        for column, (number, text) in enumerate((
+            ("1", "Dán liên kết"),
+            ("2", "Chọn mức chi tiết"),
+            ("3", "Bấm Tạo slide"),
+        )):
+            step = ctk.CTkFrame(self.onboarding_steps, fg_color=self.PANEL, corner_radius=10)
+            step.grid(row=0, column=column, sticky="ew", padx=(0, 8) if column < 2 else 0)
+            ctk.CTkLabel(
+                step,
+                text=number,
+                width=24,
+                height=24,
+                corner_radius=12,
+                fg_color=self.ACCENT_SOFT,
+                text_color=self.ACCENT_TEXT,
+                font=ctk.CTkFont(size=11, weight="bold"),
+            ).grid(row=0, column=0, padx=(12, 8), pady=12)
+            ctk.CTkLabel(
+                step,
+                text=text,
+                text_color=self.TEXT,
+                font=ctk.CTkFont(size=12),
+            ).grid(row=0, column=1, sticky="w", padx=(0, 10))
+
+        self.progress_bar = ctk.CTkProgressBar(
+            self.action_card,
+            height=8,
+            corner_radius=4,
+            progress_color=self.ORANGE,
+            fg_color=self.TRACK,
+        )
+        self.progress_bar.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(0, 22), pady=(16, 22))
+        self.progress_bar.set(0)
+        self.progress_bar.grid_remove()
+
+    def show_progress_area(self) -> None:
+        if self.onboarding_steps.winfo_manager():
+            self.onboarding_steps.grid_remove()
+            self.progress_bar.grid()
 
     def refresh_output_button(self) -> None:
         if not hasattr(self, "output_button"):
             return
         path = Path(self.output_var.get()).expanduser()
         label = path.name or str(path)
-        self.output_button.configure(text=f"⌄  {label}")
+        self.output_button.configure(text=f"  {label}")
 
     def on_preset_change(self, value: str) -> None:
+        self.preset_hint.configure(text=self.PRESET_HINTS.get(value, ""))
         if value == "Tùy chỉnh":
             self.update_custom_labels()
             self.custom_panel.grid()
@@ -770,9 +789,13 @@ class SlideFlowApp(ctk.CTk):
     def install_scroll_bindings(self) -> None:
         """Install wheel handling and Tk 9's app-wide trackpad workaround."""
         tag = "SlideFlowTrackpad"
-        self.bind_class(tag, "<MouseWheel>", self.scroll_with_trackpad)
-        self.bind_class(tag, "<Button-4>", lambda event: self.scroll_with_buttons(event, -1))
-        self.bind_class(tag, "<Button-5>", lambda event: self.scroll_with_buttons(event, 1))
+        # bind_class registers a new Tcl command on every call and never frees
+        # the one it replaces, so register the class handlers only once.
+        if not getattr(self, "_scroll_class_bound", False):
+            self.bind_class(tag, "<MouseWheel>", self.scroll_with_trackpad)
+            self.bind_class(tag, "<Button-4>", lambda event: self.scroll_with_buttons(event, -1))
+            self.bind_class(tag, "<Button-5>", lambda event: self.scroll_with_buttons(event, 1))
+            self._scroll_class_bound = True
 
         # On macOS with Tk 9, trackpads emit TouchpadScroll instead of
         # MouseWheel.  Binding this event to individual CustomTkinter widgets
@@ -849,8 +872,47 @@ class SlideFlowApp(ctk.CTk):
             self.refresh_output_button()
 
     @staticmethod
-    def history_time_label(timestamp: float) -> str:
-        return datetime.fromtimestamp(timestamp).strftime("%d/%m/%Y • %H:%M")
+    def history_time_label(timestamp: float, now: datetime | None = None) -> str:
+        moment = datetime.fromtimestamp(timestamp)
+        now = now or datetime.now()
+        days = (now.date() - moment.date()).days
+        clock = moment.strftime("%H:%M")
+        if days == 0:
+            return f"Hôm nay • {clock}"
+        if days == 1:
+            return f"Hôm qua • {clock}"
+        if 1 < days < 7:
+            return f"{days} ngày trước • {clock}"
+        return moment.strftime("%d/%m/%Y • %H:%M")
+
+    def bind_row_hover(self, row: ctk.CTkFrame, on_click) -> None:
+        """Highlight a whole row on hover and make every part of it clickable."""
+
+        def contains_pointer() -> bool:
+            widget = row.winfo_containing(*row.winfo_pointerxy())
+            while widget is not None:
+                if widget == row:
+                    return True
+                widget = widget.master
+            return False
+
+        def enter(_event) -> None:
+            row.configure(fg_color=self.PANEL)
+
+        def leave(_event) -> None:
+            if not contains_pointer():
+                row.configure(fg_color="transparent")
+
+        def attach(widget) -> None:
+            widget.bind("<Enter>", enter, add="+")
+            widget.bind("<Leave>", leave, add="+")
+            if not isinstance(widget, ctk.CTkButton):
+                widget.bind("<Button-1>", lambda _event: on_click(), add="+")
+                widget.configure(cursor="pointinghand")
+            for child in widget.winfo_children():
+                attach(child)
+
+        attach(row)
 
     def refresh_history_card(self) -> None:
         if not hasattr(self, "history_card"):
@@ -861,110 +923,121 @@ class SlideFlowApp(ctk.CTk):
         entries = self.slide_history.entries
         visible_entries = entries[: self.HISTORY_VISIBLE_LIMIT]
         header = ctk.CTkFrame(self.history_card, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(20, 10))
+        header.grid(row=0, column=0, sticky="ew", padx=22, pady=(18, 8))
         header.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(
             header,
-            text="↺",
-            width=30,
-            height=30,
-            corner_radius=15,
-            fg_color=self.ACCENT_SOFT,
-            text_color=self.ACCENT_TEXT,
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).grid(row=0, column=0, rowspan=2, padx=(0, 12))
-        ctk.CTkLabel(
-            header,
-            text="Lịch sử",
+            text="Gần đây",
             text_color=self.TEXT,
-            font=ctk.CTkFont(size=18, weight="bold"),
-        ).grid(row=0, column=1, sticky="w")
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(
             header,
-            text=f"{len(entries)} bài đã tạo slide" if entries else "Các bài đã tạo slide sẽ xuất hiện tại đây",
-            text_color=self.MUTED,
+            text=f"{len(entries)} bộ slide" if entries else "",
+            text_color=self.FAINT,
             font=ctk.CTkFont(size=12),
-        ).grid(row=1, column=1, sticky="w")
-        ctk.CTkButton(
-            header,
-            text="Xóa lịch sử",
-            width=86,
-            height=28,
-            corner_radius=7,
-            fg_color="transparent",
-            hover_color=self.SURFACE_HOVER,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=11),
-            state="normal" if entries else "disabled",
-            command=self.clear_slide_history,
-        ).grid(row=0, column=2, rowspan=2, padx=(12, 0))
+        ).grid(row=0, column=1, sticky="w", padx=(10, 0))
+        if entries:
+            ctk.CTkButton(
+                header,
+                text="Xóa lịch sử",
+                width=86,
+                height=28,
+                corner_radius=7,
+                fg_color="transparent",
+                hover_color=self.SURFACE,
+                text_color=self.MUTED,
+                font=ctk.CTkFont(size=12),
+                command=self.clear_slide_history,
+            ).grid(row=0, column=2, sticky="e")
 
         if not entries:
+            empty = ctk.CTkFrame(self.history_card, fg_color=self.PANEL, corner_radius=10)
+            empty.grid(row=1, column=0, sticky="ew", padx=22, pady=(0, 22))
+            empty.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
-                self.history_card,
-                text="Chưa có PDF slide nào trong lịch sử.",
-                height=46,
-                corner_radius=9,
-                fg_color=self.TOPBAR,
+                empty,
+                text="Chưa có bộ slide nào",
+                text_color=self.TEXT,
+                font=ctk.CTkFont(size=13, weight="bold"),
+            ).grid(row=0, column=0, pady=(22, 2))
+            ctk.CTkLabel(
+                empty,
+                text="PDF bạn tạo sẽ xuất hiện ở đây để mở lại nhanh.",
                 text_color=self.MUTED,
-                anchor="w",
-            ).grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 22), ipadx=14)
+                font=ctk.CTkFont(size=12),
+            ).grid(row=1, column=0, pady=(0, 22))
             return
 
         for row_number, entry in enumerate(visible_entries, start=1):
-            row = ctk.CTkFrame(self.history_card, fg_color=self.TOPBAR, corner_radius=9)
-            row.grid(row=row_number, column=0, sticky="ew", padx=28, pady=(0, 7))
+            if row_number > 1:
+                ctk.CTkFrame(self.history_card, height=1, fg_color=self.SURFACE).grid(
+                    row=2 * row_number - 1, column=0, sticky="ew", padx=34
+                )
+            row = ctk.CTkFrame(self.history_card, fg_color="transparent", corner_radius=10)
+            row.grid(row=2 * row_number, column=0, sticky="ew", padx=12, pady=1)
             row.grid_columnconfigure(1, weight=1)
             # A neutral file tag instead of an accent badge: history is
             # reference material and should not compete with live status.
             ctk.CTkLabel(
                 row,
                 text="PDF",
-                width=38,
-                height=26,
-                corner_radius=6,
+                width=40,
+                height=40,
+                corner_radius=8,
                 fg_color=self.SURFACE,
-                text_color=self.MUTED,
+                text_color=self.ACCENT_TEXT,
                 font=ctk.CTkFont(size=10, weight="bold"),
-            ).grid(row=0, column=0, rowspan=2, padx=(12, 10), pady=10)
+            ).grid(row=0, column=0, rowspan=2, padx=(10, 12), pady=10)
             ctk.CTkLabel(
                 row,
                 text=entry.title,
                 text_color=self.TEXT,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 anchor="w",
-            ).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=(8, 0))
+            ).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=(10, 0))
             ctk.CTkLabel(
                 row,
-                text=f"{self.history_time_label(entry.created_at)} • {Path(entry.output_dir).name}",
-                text_color=self.MUTED,
+                text=self.history_time_label(entry.created_at),
+                text_color=self.FAINT,
                 font=ctk.CTkFont(size=11),
                 anchor="w",
-            ).grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=(0, 8))
+            ).grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=(0, 10))
+            ctk.CTkButton(
+                row,
+                text="Thư mục",
+                width=72,
+                height=28,
+                corner_radius=7,
+                fg_color="transparent",
+                hover_color=self.SURFACE_HOVER,
+                text_color=self.MUTED,
+                font=ctk.CTkFont(size=12),
+                command=lambda folder=entry.output_dir: self.open_path(folder),
+            ).grid(row=0, column=2, rowspan=2, padx=(0, 4))
             ctk.CTkButton(
                 row,
                 text="Mở PDF",
                 width=76,
-                height=30,
+                height=28,
                 corner_radius=7,
                 fg_color=self.SURFACE,
                 hover_color=self.SURFACE_HOVER,
                 text_color=self.TEXT,
+                font=ctk.CTkFont(size=12),
                 command=lambda path=entry.pdf_path: self.open_path(path),
-            ).grid(row=0, column=2, rowspan=2, padx=(0, 12), pady=10)
-        ctk.CTkFrame(self.history_card, height=9, fg_color="transparent").grid(
-            row=len(visible_entries) + 1,
-            column=0,
-        )
+            ).grid(row=0, column=3, rowspan=2, padx=(0, 10))
+            self.bind_row_hover(row, lambda path=entry.pdf_path: self.open_path(path))
+        footer_row = 2 * len(visible_entries) + 1
         if len(entries) > len(visible_entries):
             ctk.CTkLabel(
                 self.history_card,
-                text=f"Đang hiển thị {len(visible_entries)} bài gần nhất trong {len(entries)} bài.",
-                text_color=self.MUTED,
+                text=f"Đang hiển thị {len(visible_entries)} bộ gần nhất trong {len(entries)}.",
+                text_color=self.FAINT,
                 font=ctk.CTkFont(size=11),
-            ).grid(row=len(visible_entries) + 2, column=0, pady=(0, 14))
+            ).grid(row=footer_row, column=0, pady=(8, 16))
+        else:
+            ctk.CTkFrame(self.history_card, height=10, fg_color="transparent").grid(row=footer_row, column=0)
         self.after_idle(self.install_scroll_bindings)
 
     def clear_slide_history(self) -> None:
@@ -1149,6 +1222,7 @@ class SlideFlowApp(ctk.CTk):
         self.playlist_loading = True
         self.update_slide_start_button()
         if not self.worker_running:
+            self.show_progress_area()
             self.set_progress(0.02)
             self.set_tone("running")
             self.status_label.configure(text="Đang đọc playlist…")
@@ -1485,6 +1559,11 @@ class SlideFlowApp(ctk.CTk):
         self.custom_threshold_slider.configure(state=setting_state)
         self.custom_reset_button.configure(state=setting_state)
         self.cancel_button.configure(state="normal" if running else "disabled")
+        if running:
+            self.show_progress_area()
+            self.cancel_button.grid()
+        else:
+            self.cancel_button.grid_remove()
         self.cancel_button.configure(text="Dừng hàng chờ" if running and self.active_job_kind == "slide" else "Dừng")
         self.update_slide_start_button()
 
