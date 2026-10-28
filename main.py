@@ -64,6 +64,7 @@ class SlideFlowApp(ctk.CTk):
     }
     # Short ease-out transitions only; see "Motion" in DESIGN.md.
     PROGRESS_ANIMATION_MS = 240
+    PROGRESS_ANIMATION_MIN_STEP = 0.02
     ANIMATION_FRAME_MS = 16
     # macOS and Tk 9 already report high-resolution scroll deltas. Keeping a
     # 1:1 pixel mapping preserves the trackpad's native acceleration.
@@ -104,6 +105,7 @@ class SlideFlowApp(ctk.CTk):
         self.ipc_server = LocalIPCServer(self.dispatch_extension_message)
         self.preview_images: list[ctk.CTkImage] = []
         self.progress_animation: str | None = None
+        self.status_tone = "idle"
         self.reduce_motion = self.system_prefers_reduced_motion()
         self.output_var = ctk.StringVar(value=str(Path.home() / "Documents" / "SlideFlow"))
         self.slide_history = SlideHistoryStore()
@@ -822,6 +824,9 @@ class SlideFlowApp(ctk.CTk):
 
     def quit_application(self, _event=None) -> str:
         self.cancel_event.set()
+        if animation := getattr(self, "progress_animation", None):
+            self.after_cancel(animation)
+            self.progress_animation = None
         if ipc_server := getattr(self, "ipc_server", None):
             ipc_server.stop()
         self.destroy()
@@ -1613,6 +1618,11 @@ class SlideFlowApp(ctk.CTk):
         return 1 - (1 - t) ** 3
 
     def set_tone(self, tone: str) -> None:
+        # update_progress calls this for every sampled frame; skip the
+        # redraw when the tone is unchanged.
+        if tone == self.status_tone:
+            return
+        self.status_tone = tone
         glyph, background, foreground = self.STATUS_TONES[tone]
         self.status_icon.configure(
             text=glyph,
@@ -1629,7 +1639,13 @@ class SlideFlowApp(ctk.CTk):
         # Start from what is on screen so frequent worker updates never
         # make the bar jump back to an earlier target.
         start = float(self.progress_bar.get())
-        if self.reduce_motion or value <= start:
+        # Frame sampling reports progress many times per second in tiny
+        # steps; animating those (or a hidden window) only burns CPU.
+        if (
+            self.reduce_motion
+            or value - start < self.PROGRESS_ANIMATION_MIN_STEP
+            or not self.winfo_viewable()
+        ):
             self.progress_bar.set(value)
             return
         frames = max(1, self.PROGRESS_ANIMATION_MS // self.ANIMATION_FRAME_MS)

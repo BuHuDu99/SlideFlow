@@ -169,8 +169,13 @@ inputs, and 6px for small tags.
 
 - Animate only to explain a change in state. The only animation today is the
   progress bar, which eases forward over 240ms with an ease-out cubic.
-- Resets and decreases jump immediately. Enter and change animations use
-  ease-out and never ease-in.
+- Resets, decreases, steps smaller than 2% (`PROGRESS_ANIMATION_MIN_STEP`),
+  and updates while the window is hidden jump immediately. Frame sampling
+  reports progress many times a second, so animating every step would
+  redraw the bar constantly. Enter and change animations use ease-out and
+  never ease-in.
+- A status tone is only redrawn when it changes, and any running animation
+  is cancelled before the app quits.
 - Respect macOS **Reduce motion**: when it is on, values change instantly.
 - Do not animate hover, keyboard shortcuts, or anything that runs many times a
   minute.
