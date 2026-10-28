@@ -25,18 +25,46 @@ ctk.set_default_color_theme("blue")
 
 
 class SlideFlowApp(ctk.CTk):
+    # Design tokens. DESIGN.md is the source of truth for these values and
+    # the rules for applying them; keep the two in sync.
     BG = "#191614"
-    CARD = "#24201D"
+    INPUT_BG = "#151210"
     TOPBAR = "#211D1A"
+    PANEL = "#2A231F"
+    CARD = "#24201D"
     SURFACE = "#322B27"
     SURFACE_HOVER = "#433731"
+    SURFACE_PRESSED = "#5A4941"
     BORDER = "#52443D"
-    NAVY = "#FFFFFF"
+    TRACK = "#493A33"
+    SCROLLBAR = "#765040"
+    SCROLLBAR_HOVER = "#98604B"
+    TEXT = "#FFFFFF"
+    MUTED = "#C6B9B2"
+    FAINT = "#9A8E88"
+    PLACEHOLDER = "#968982"
     ORANGE = "#D24726"
     ORANGE_HOVER = "#B83A20"
-    MUTED = "#C6B9B2"
+    ON_ACCENT = "#FFFFFF"
     ACCENT_SOFT = "#4A251B"
     ACCENT_TEXT = "#FFB59E"
+    KNOB = "#FFFFFF"
+    KNOB_HOVER = "#FFE1D6"
+    SUCCESS_SOFT = "#1F3A2A"
+    SUCCESS_TEXT = "#8FE0AE"
+    DANGER_SOFT = "#4A1F1F"
+    DANGER_TEXT = "#FFA8A0"
+    # Each status tone pairs a glyph with a badge background and foreground.
+    STATUS_TONES = {
+        "idle": ("▶", "ACCENT_SOFT", "ACCENT_TEXT"),
+        "running": ("●", "ACCENT_SOFT", "ACCENT_TEXT"),
+        "success": ("✓", "SUCCESS_SOFT", "SUCCESS_TEXT"),
+        "error": ("!", "DANGER_SOFT", "DANGER_TEXT"),
+        "stopped": ("■", "SURFACE", "MUTED"),
+    }
+    # Short ease-out transitions only; see "Motion" in DESIGN.md.
+    PROGRESS_ANIMATION_MS = 240
+    ANIMATION_FRAME_MS = 16
     # macOS and Tk 9 already report high-resolution scroll deltas. Keeping a
     # 1:1 pixel mapping preserves the trackpad's native acceleration.
     SCROLL_PIXELS_PER_DELTA = 1
@@ -75,6 +103,8 @@ class SlideFlowApp(ctk.CTk):
         self.playlist_dialog: ctk.CTkToplevel | None = None
         self.ipc_server = LocalIPCServer(self.dispatch_extension_message)
         self.preview_images: list[ctk.CTkImage] = []
+        self.progress_animation: str | None = None
+        self.reduce_motion = self.system_prefers_reduced_motion()
         self.output_var = ctk.StringVar(value=str(Path.home() / "Documents" / "SlideFlow"))
         self.slide_history = SlideHistoryStore()
         self.slide_history.bootstrap(self.output_var.get())
@@ -136,7 +166,7 @@ class SlideFlowApp(ctk.CTk):
         ctk.CTkLabel(
             brand,
             text="SlideFlow",
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=19, weight="bold"),
         ).grid(row=0, column=1, sticky="sw")
         ctk.CTkLabel(
@@ -146,16 +176,20 @@ class SlideFlowApp(ctk.CTk):
             font=ctk.CTkFont(size=10, weight="bold"),
         ).grid(row=1, column=1, sticky="nw")
 
+        # Only "Tạo slide" is filled with the accent; every other toolbar
+        # control is secondary or ghost so the primary action reads first.
         ctk.CTkButton(
             toolbar,
             text="＋  Dán liên kết",
-            width=146,
+            width=138,
             height=44,
             corner_radius=9,
-            fg_color="#FFFFFF",
-            hover_color="#F4EAE6",
-            text_color=self.ORANGE,
-            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color=self.SURFACE,
+            hover_color=self.SURFACE_HOVER,
+            border_width=1,
+            border_color=self.BORDER,
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=13, weight="bold"),
             command=self.paste_url,
         ).grid(row=0, column=1, padx=(0, 10), pady=16)
 
@@ -165,10 +199,10 @@ class SlideFlowApp(ctk.CTk):
             corner_radius=9,
             border_width=1,
             border_color=self.BORDER,
-            fg_color="#151210",
-            text_color=self.NAVY,
+            fg_color=self.INPUT_BG,
+            text_color=self.TEXT,
             placeholder_text="Dán liên kết YouTube…",
-            placeholder_text_color="#968982",
+            placeholder_text_color=self.PLACEHOLDER,
             font=ctk.CTkFont(size=14),
         )
         self.url_entry.grid(row=0, column=2, sticky="ew", padx=(0, 10), pady=16)
@@ -176,15 +210,15 @@ class SlideFlowApp(ctk.CTk):
         self.script_button = ctk.CTkButton(
             toolbar,
             text="Lấy script",
-            width=116,
+            width=104,
             height=44,
             corner_radius=9,
-            fg_color=self.SURFACE,
-            hover_color=self.SURFACE_HOVER,
+            fg_color="transparent",
+            hover_color=self.SURFACE,
             border_width=1,
             border_color=self.BORDER,
-            text_color=self.NAVY,
-            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=13),
             command=self.start_transcripts,
         )
         self.script_button.grid(row=0, column=3, padx=(0, 8), pady=16)
@@ -192,15 +226,15 @@ class SlideFlowApp(ctk.CTk):
         self.audio_script_button = ctk.CTkButton(
             toolbar,
             text="Chép từ âm thanh",
-            width=146,
+            width=140,
             height=44,
             corner_radius=9,
-            fg_color=self.SURFACE,
-            hover_color=self.SURFACE_HOVER,
+            fg_color="transparent",
+            hover_color=self.SURFACE,
             border_width=1,
             border_color=self.BORDER,
-            text_color=self.NAVY,
-            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=13),
             command=lambda: self.start_transcripts(audio=True),
         )
         self.audio_script_button.grid(row=0, column=4, padx=(0, 8), pady=16)
@@ -213,7 +247,7 @@ class SlideFlowApp(ctk.CTk):
             corner_radius=9,
             fg_color=self.ORANGE,
             hover_color=self.ORANGE_HOVER,
-            text_color="#FFFFFF",
+            text_color=self.ON_ACCENT,
             font=ctk.CTkFont(size=14, weight="bold"),
             command=self.start_extraction,
         )
@@ -223,7 +257,7 @@ class SlideFlowApp(ctk.CTk):
             self,
             corner_radius=0,
             height=94,
-            fg_color="#211D1A",
+            fg_color=self.TOPBAR,
             border_width=0,
         )
         settings_bar.grid(row=1, column=0, sticky="ew")
@@ -260,9 +294,9 @@ class SlideFlowApp(ctk.CTk):
             variable=self.transcript_var,
             width=112,
             progress_color=self.ORANGE,
-            button_color="#FFFFFF",
-            button_hover_color="#E8E8EC",
-            text_color=self.NAVY,
+            button_color=self.KNOB,
+            button_hover_color=self.KNOB_HOVER,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=12),
         )
         self.transcript_check.grid(row=1, column=0, sticky="w")
@@ -285,7 +319,7 @@ class SlideFlowApp(ctk.CTk):
             hover_color=self.SURFACE_HOVER,
             border_width=1,
             border_color=self.BORDER,
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             anchor="w",
             command=self.choose_output,
         )
@@ -296,7 +330,7 @@ class SlideFlowApp(ctk.CTk):
             self,
             corner_radius=0,
             height=92,
-            fg_color="#2A231F",
+            fg_color=self.PANEL,
             border_width=0,
         )
         self.custom_panel.grid(row=2, column=0, sticky="ew")
@@ -308,7 +342,7 @@ class SlideFlowApp(ctk.CTk):
         ctk.CTkLabel(
             custom_intro,
             text="Tùy chỉnh",
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=13, weight="bold"),
         ).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(
@@ -324,7 +358,7 @@ class SlideFlowApp(ctk.CTk):
         self.custom_interval_label = ctk.CTkLabel(
             interval_box,
             text="Khoảng lấy mẫu  •  7 giây",
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=11, weight="bold"),
         )
         self.custom_interval_label.grid(row=0, column=0, sticky="w")
@@ -337,9 +371,9 @@ class SlideFlowApp(ctk.CTk):
             height=16,
             button_length=16,
             progress_color=self.ORANGE,
-            fg_color="#493A33",
-            button_color="#FFFFFF",
-            button_hover_color="#FFE1D6",
+            fg_color=self.TRACK,
+            button_color=self.KNOB,
+            button_hover_color=self.KNOB_HOVER,
             command=self.update_custom_labels,
         )
         self.custom_interval_slider.grid(row=1, column=0, sticky="ew", pady=(8, 0))
@@ -350,7 +384,7 @@ class SlideFlowApp(ctk.CTk):
         self.custom_threshold_label = ctk.CTkLabel(
             threshold_box,
             text="Độ nhạy thay đổi  •  92%",
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=11, weight="bold"),
         )
         self.custom_threshold_label.grid(row=0, column=0, sticky="w")
@@ -363,9 +397,9 @@ class SlideFlowApp(ctk.CTk):
             height=16,
             button_length=16,
             progress_color=self.ORANGE,
-            fg_color="#493A33",
-            button_color="#FFFFFF",
-            button_hover_color="#FFE1D6",
+            fg_color=self.TRACK,
+            button_color=self.KNOB,
+            button_hover_color=self.KNOB_HOVER,
             command=self.update_custom_labels,
         )
         self.custom_threshold_slider.grid(row=1, column=0, sticky="ew", pady=(8, 0))
@@ -392,7 +426,7 @@ class SlideFlowApp(ctk.CTk):
         ctk.CTkLabel(
             navigation,
             text="TIẾN TRÌNH",
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=12, weight="bold"),
         ).grid(row=0, column=0, sticky="w", pady=(18, 10))
         quick_actions = ctk.CTkFrame(navigation, fg_color="transparent")
@@ -428,8 +462,8 @@ class SlideFlowApp(ctk.CTk):
             self,
             fg_color="transparent",
             corner_radius=0,
-            scrollbar_button_color="#765040",
-            scrollbar_button_hover_color="#98604B",
+            scrollbar_button_color=self.SCROLLBAR,
+            scrollbar_button_hover_color=self.SCROLLBAR_HOVER,
         )
         body.grid(row=4, column=0, sticky="nsew", padx=22, pady=(0, 10))
         body.grid_columnconfigure(0, weight=1)
@@ -441,7 +475,7 @@ class SlideFlowApp(ctk.CTk):
         self.action_card = self.card(body)
         self.action_card.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.action_card.grid_columnconfigure(1, weight=1)
-        status_icon = ctk.CTkLabel(
+        self.status_icon = ctk.CTkLabel(
             self.action_card,
             text="▶",
             width=54,
@@ -451,11 +485,11 @@ class SlideFlowApp(ctk.CTk):
             text_color=self.ACCENT_TEXT,
             font=ctk.CTkFont(size=20, weight="bold"),
         )
-        status_icon.grid(row=0, column=0, rowspan=3, padx=(22, 16), pady=22, sticky="n")
+        self.status_icon.grid(row=0, column=0, rowspan=3, padx=(22, 16), pady=22, sticky="n")
         self.status_label = ctk.CTkLabel(
             self.action_card,
             text="Sẵn sàng",
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=18, weight="bold"),
         )
         self.status_label.grid(row=0, column=1, padx=(0, 16), pady=(22, 2), sticky="w")
@@ -472,7 +506,7 @@ class SlideFlowApp(ctk.CTk):
             height=8,
             corner_radius=4,
             progress_color=self.ORANGE,
-            fg_color="#493A33",
+            fg_color=self.TRACK,
         )
         self.progress_bar.grid(row=2, column=1, sticky="ew", padx=(0, 16), pady=(0, 22))
         self.progress_bar.set(0)
@@ -509,10 +543,10 @@ class SlideFlowApp(ctk.CTk):
 
         privacy_card = ctk.CTkFrame(
             body,
-            fg_color="#211D1A",
+            fg_color=self.TOPBAR,
             corner_radius=12,
             border_width=1,
-            border_color="#433731",
+            border_color=self.SURFACE_HOVER,
         )
         privacy_card.grid(row=4, column=0, sticky="ew", pady=(0, 8))
         privacy_card.grid_columnconfigure(1, weight=1)
@@ -536,19 +570,19 @@ class SlideFlowApp(ctk.CTk):
             font=ctk.CTkFont(size=12),
         ).grid(row=0, column=1, sticky="w", pady=14)
 
-        footer = ctk.CTkFrame(self, corner_radius=0, height=30, fg_color="#151210")
+        footer = ctk.CTkFrame(self, corner_radius=0, height=30, fg_color=self.INPUT_BG)
         footer.grid(row=5, column=0, sticky="ew")
         footer.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             footer,
             text="ONLINE • RIÊNG TƯ",
-            text_color="#9A8E88",
+            text_color=self.FAINT,
             font=ctk.CTkFont(size=10, weight="bold"),
         ).grid(row=0, column=0, padx=22, pady=7, sticky="w")
         ctk.CTkLabel(
             footer,
             text="Enter để bắt đầu  •  Esc để dừng",
-            text_color="#9A8E88",
+            text_color=self.FAINT,
             font=ctk.CTkFont(size=10),
         ).grid(row=0, column=1, padx=22, pady=7, sticky="e")
 
@@ -576,11 +610,11 @@ class SlideFlowApp(ctk.CTk):
             corner_radius=8,
             fg_color=self.SURFACE,
             button_color=self.SURFACE_HOVER,
-            button_hover_color="#5A4941",
-            text_color=self.NAVY,
+            button_hover_color=self.SURFACE_PRESSED,
+            text_color=self.TEXT,
             dropdown_fg_color=self.SURFACE,
             dropdown_hover_color=self.SURFACE_HOVER,
-            dropdown_text_color=self.NAVY,
+            dropdown_text_color=self.TEXT,
         )
         menu.grid(row=1, column=0, sticky="w")
         return menu
@@ -645,11 +679,11 @@ class SlideFlowApp(ctk.CTk):
             text_color=self.ACCENT_TEXT,
             font=ctk.CTkFont(size=14, weight="bold"),
         ).grid(row=0, column=0, rowspan=2, padx=(0, 12))
-        ctk.CTkLabel(frame, text=title, text_color=self.NAVY, font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=1, sticky="w")
+        ctk.CTkLabel(frame, text=title, text_color=self.TEXT, font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=1, sticky="w")
         ctk.CTkLabel(frame, text=subtitle, text_color=self.MUTED, font=ctk.CTkFont(size=12)).grid(row=1, column=1, sticky="w")
 
     def field_label(self, parent, text: str, row: int, column: int) -> None:
-        ctk.CTkLabel(parent, text=text, text_color=self.NAVY, font=ctk.CTkFont(size=13, weight="bold")).grid(
+        ctk.CTkLabel(parent, text=text, text_color=self.TEXT, font=ctk.CTkFont(size=13, weight="bold")).grid(
             row=row, column=column, sticky="w", padx=28, pady=(12, 0)
         )
 
@@ -837,7 +871,7 @@ class SlideFlowApp(ctk.CTk):
         ctk.CTkLabel(
             header,
             text="Lịch sử",
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=18, weight="bold"),
         ).grid(row=0, column=1, sticky="w")
         ctk.CTkLabel(
@@ -868,30 +902,32 @@ class SlideFlowApp(ctk.CTk):
                 text="Chưa có PDF slide nào trong lịch sử.",
                 height=46,
                 corner_radius=9,
-                fg_color="#211D1A",
+                fg_color=self.TOPBAR,
                 text_color=self.MUTED,
                 anchor="w",
             ).grid(row=1, column=0, sticky="ew", padx=28, pady=(0, 22), ipadx=14)
             return
 
         for row_number, entry in enumerate(visible_entries, start=1):
-            row = ctk.CTkFrame(self.history_card, fg_color="#211D1A", corner_radius=9)
+            row = ctk.CTkFrame(self.history_card, fg_color=self.TOPBAR, corner_radius=9)
             row.grid(row=row_number, column=0, sticky="ew", padx=28, pady=(0, 7))
             row.grid_columnconfigure(1, weight=1)
+            # A neutral file tag instead of an accent badge: history is
+            # reference material and should not compete with live status.
             ctk.CTkLabel(
                 row,
-                text=str(row_number),
-                width=28,
-                height=28,
-                corner_radius=14,
-                fg_color=self.ACCENT_SOFT,
-                text_color=self.ACCENT_TEXT,
+                text="PDF",
+                width=38,
+                height=26,
+                corner_radius=6,
+                fg_color=self.SURFACE,
+                text_color=self.MUTED,
                 font=ctk.CTkFont(size=10, weight="bold"),
             ).grid(row=0, column=0, rowspan=2, padx=(12, 10), pady=10)
             ctk.CTkLabel(
                 row,
                 text=entry.title,
-                text_color=self.NAVY,
+                text_color=self.TEXT,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 anchor="w",
             ).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=(8, 0))
@@ -910,7 +946,7 @@ class SlideFlowApp(ctk.CTk):
                 corner_radius=7,
                 fg_color=self.SURFACE,
                 hover_color=self.SURFACE_HOVER,
-                text_color=self.NAVY,
+                text_color=self.TEXT,
                 command=lambda path=entry.pdf_path: self.open_path(path),
             ).grid(row=0, column=2, rowspan=2, padx=(0, 12), pady=10)
         ctk.CTkFrame(self.history_card, height=9, fg_color="transparent").grid(
@@ -1108,7 +1144,8 @@ class SlideFlowApp(ctk.CTk):
         self.playlist_loading = True
         self.update_slide_start_button()
         if not self.worker_running:
-            self.progress_bar.set(0.02)
+            self.set_progress(0.02)
+            self.set_tone("running")
             self.status_label.configure(text="Đang đọc playlist…")
             self.status_detail.configure(text="Đang lấy danh sách video; chưa tải nội dung video.")
         extractor = OnlineSlideExtractor(
@@ -1134,7 +1171,8 @@ class SlideFlowApp(ctk.CTk):
         self.playlist_loading = False
         self.update_slide_start_button()
         if not self.worker_running:
-            self.progress_bar.set(0)
+            self.set_progress(0)
+            self.set_tone("error")
             self.status_label.configure(text="Không đọc được playlist")
             self.status_detail.configure(text=error[:180])
         messagebox.showerror("SlideFlow", error)
@@ -1143,7 +1181,8 @@ class SlideFlowApp(ctk.CTk):
         self.playlist_loading = False
         self.update_slide_start_button()
         if not self.worker_running:
-            self.progress_bar.set(0)
+            self.set_progress(0)
+            self.set_tone("idle")
             self.status_label.configure(text=f"Đã tìm thấy {len(result.videos)} video")
             self.status_detail.configure(text="Chọn các video cần tạo slide rồi bấm Bắt đầu.")
         self.show_playlist_selection(result)
@@ -1177,7 +1216,7 @@ class SlideFlowApp(ctk.CTk):
         ctk.CTkLabel(
             heading,
             text=result.title,
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=19, weight="bold"),
             anchor="w",
         ).grid(row=0, column=0, sticky="ew", padx=22, pady=(18, 2))
@@ -1195,8 +1234,8 @@ class SlideFlowApp(ctk.CTk):
             dialog,
             fg_color="transparent",
             corner_radius=0,
-            scrollbar_button_color="#765040",
-            scrollbar_button_hover_color="#98604B",
+            scrollbar_button_color=self.SCROLLBAR,
+            scrollbar_button_hover_color=self.SCROLLBAR_HOVER,
         )
         video_list.grid(row=1, column=0, sticky="nsew", padx=18, pady=14)
         video_list.grid_columnconfigure(0, weight=1)
@@ -1231,7 +1270,7 @@ class SlideFlowApp(ctk.CTk):
             ctk.CTkLabel(
                 row,
                 text=f"{video.position:03d}. {video.title}",
-                text_color=self.NAVY,
+                text_color=self.TEXT,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 anchor="w",
                 justify="left",
@@ -1261,7 +1300,7 @@ class SlideFlowApp(ctk.CTk):
             corner_radius=8,
             fg_color=self.ORANGE,
             hover_color=self.ORANGE_HOVER,
-            text_color="#FFFFFF",
+            text_color=self.ON_ACCENT,
         )
 
         def update_selection_count() -> None:
@@ -1356,7 +1395,8 @@ class SlideFlowApp(ctk.CTk):
         self.active_job_kind = "slide"
         self.cancel_event.clear()
         self.set_running(True)
-        self.progress_bar.set(0.01)
+        self.set_progress(0.01)
+        self.set_tone("running")
         self.status_label.configure(text="Đang chuẩn bị…")
         self.status_detail.configure(
             text=f"{job.display_title} • còn {len(self.slide_jobs)} video trong hàng chờ."
@@ -1394,7 +1434,8 @@ class SlideFlowApp(ctk.CTk):
         self.cancel_event.clear()
         self.set_running(True)
         self.result_card.grid_remove()
-        self.progress_bar.set(0.01)
+        self.set_progress(0.01)
+        self.set_tone("running")
         self.status_label.configure(
             text="Đang chuẩn bị chép từ âm thanh…" if audio else "Đang chuẩn bị lấy script…"
         )
@@ -1486,23 +1527,24 @@ class SlideFlowApp(ctk.CTk):
             position += 1
 
         for row_number, (number, status, job) in enumerate(items, start=1):
-            row = ctk.CTkFrame(self.queue_card, fg_color="#211D1A", corner_radius=8)
+            row = ctk.CTkFrame(self.queue_card, fg_color=self.TOPBAR, corner_radius=8)
             row.grid(row=row_number, column=0, sticky="ew", padx=28, pady=(0, 7))
             row.grid_columnconfigure(1, weight=1)
+            running = status == "Đang chạy"
             ctk.CTkLabel(
                 row,
                 text=number,
                 width=30,
                 height=30,
                 corner_radius=15,
-                fg_color=self.ACCENT_SOFT,
-                text_color=self.ACCENT_TEXT,
+                fg_color=self.ACCENT_SOFT if running else self.SURFACE,
+                text_color=self.ACCENT_TEXT if running else self.MUTED,
                 font=ctk.CTkFont(size=11, weight="bold"),
             ).grid(row=0, column=0, rowspan=2, padx=(12, 10), pady=10)
             ctk.CTkLabel(
                 row,
                 text=job.display_title,
-                text_color=self.NAVY,
+                text_color=self.TEXT,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 anchor="w",
             ).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=(9, 0))
@@ -1550,12 +1592,65 @@ class SlideFlowApp(ctk.CTk):
         if removed:
             self.status_detail.configure(text=f"Đã xóa {removed} video đang chờ; tác vụ hiện tại vẫn tiếp tục.")
 
+    @staticmethod
+    def system_prefers_reduced_motion() -> bool:
+        """Honour macOS Accessibility › Display › Reduce motion."""
+        try:
+            completed = subprocess.run(
+                ["defaults", "read", "com.apple.universalaccess", "reduceMotion"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return completed.stdout.strip() == "1"
+
+    @staticmethod
+    def ease_out_cubic(t: float) -> float:
+        t = max(0.0, min(1.0, t))
+        return 1 - (1 - t) ** 3
+
+    def set_tone(self, tone: str) -> None:
+        glyph, background, foreground = self.STATUS_TONES[tone]
+        self.status_icon.configure(
+            text=glyph,
+            fg_color=getattr(self, background),
+            text_color=getattr(self, foreground),
+        )
+
+    def set_progress(self, value: float) -> None:
+        """Ease the bar forward; resets and reduced motion jump immediately."""
+        value = max(0.0, min(1.0, float(value)))
+        if self.progress_animation is not None:
+            self.after_cancel(self.progress_animation)
+            self.progress_animation = None
+        # Start from what is on screen so frequent worker updates never
+        # make the bar jump back to an earlier target.
+        start = float(self.progress_bar.get())
+        if self.reduce_motion or value <= start:
+            self.progress_bar.set(value)
+            return
+        frames = max(1, self.PROGRESS_ANIMATION_MS // self.ANIMATION_FRAME_MS)
+
+        def step(frame: int) -> None:
+            eased = self.ease_out_cubic(frame / frames)
+            self.progress_bar.set(start + (value - start) * eased)
+            if frame < frames:
+                self.progress_animation = self.after(self.ANIMATION_FRAME_MS, step, frame + 1)
+            else:
+                self.progress_animation = None
+
+        step(1)
+
     def queue_progress(self, message: str, value: float) -> None:
         self.after(0, self.update_progress, message, value)
 
     def update_progress(self, message: str, value: float) -> None:
+        self.set_tone("running")
         self.status_label.configure(text=message)
-        self.progress_bar.set(value)
+        self.set_progress(value)
         if "trực tuyến" in message:
             self.status_detail.configure(text="Đang lấy các khung hình cần thiết trực tiếp từ luồng video.")
         elif "script" in message.lower():
@@ -1597,6 +1692,7 @@ class SlideFlowApp(ctk.CTk):
             self.stopping_slide_queue = True
             self.refresh_slide_queue_card()
         self.cancel_event.set()
+        self.set_tone("stopped")
         self.status_label.configure(text="Đang dừng hàng chờ…" if self.active_job_kind == "slide" else "Đang dừng…")
         self.cancel_button.configure(state="disabled")
         self.update_slide_start_button()
@@ -1609,12 +1705,14 @@ class SlideFlowApp(ctk.CTk):
             self.stopping_slide_queue = False
             self.refresh_slide_queue_card()
             self.update_slide_start_button()
-            self.progress_bar.set(0)
+            self.set_progress(0)
+            self.set_tone("stopped")
             self.status_label.configure(text="Đã dừng hàng chờ")
             self.status_detail.configure(text="Các mục đang chờ đã được xóa; kết quả hoàn tất trước đó vẫn được giữ.")
             return
         self.set_running(False)
-        self.progress_bar.set(0)
+        self.set_progress(0)
+        self.set_tone("stopped")
         self.status_label.configure(text="Đã dừng")
         self.status_detail.configure(
             text=(
@@ -1634,6 +1732,7 @@ class SlideFlowApp(ctk.CTk):
             self.set_running(False)
             self.refresh_slide_queue_card()
             if len(self.slide_jobs):
+                self.set_tone("error")
                 self.status_label.configure(text="Một video gặp lỗi • đang tiếp tục hàng chờ")
                 self.status_detail.configure(text=f"{failed_job.display_title}: {error[:140]}")
                 self.after(0, self.start_next_slide_job)
@@ -1641,7 +1740,8 @@ class SlideFlowApp(ctk.CTk):
                 self.finish_slide_batch()
             return
         self.set_running(False)
-        self.progress_bar.set(0)
+        self.set_progress(0)
+        self.set_tone("error")
         self.status_label.configure(text="Chưa thể hoàn tất")
         self.status_detail.configure(text=error[:180])
         messagebox.showerror("SlideFlow", error)
@@ -1655,11 +1755,12 @@ class SlideFlowApp(ctk.CTk):
             self.slide_jobs.finish_active()
             self.slide_batch_completed += 1
         self.set_running(False)
-        self.progress_bar.set(1)
+        self.set_progress(1)
         self.show_result(result)
         self.refresh_history_card()
         self.refresh_slide_queue_card()
         if len(self.slide_jobs):
+            self.set_tone("success")
             self.status_label.configure(text="Đã xong một video • chuẩn bị video tiếp theo")
             self.status_detail.configure(
                 text=f"{self.slide_batch_completed}/{self.slide_batch_total} video hoàn tất; "
@@ -1675,12 +1776,14 @@ class SlideFlowApp(ctk.CTk):
         self.stopping_slide_queue = False
         self.set_running(False)
         self.refresh_slide_queue_card()
-        self.progress_bar.set(1 if self.slide_batch_completed else 0)
+        self.set_progress(1 if self.slide_batch_completed else 0)
         failed_count = len(self.slide_batch_failures)
         if self.slide_batch_total <= 1 and self.slide_batch_completed == 1 and not failed_count:
+            self.set_tone("success")
             self.status_label.configure(text="Bộ slide đã sẵn sàng")
             self.status_detail.configure(text="PDF đã hoàn tất; ảnh chụp tạm đã được xóa để tiết kiệm dung lượng.")
             return
+        self.set_tone("error" if failed_count else "success")
         self.status_label.configure(text="Đã hoàn tất hàng chờ")
         self.status_detail.configure(
             text=f"{self.slide_batch_completed}/{self.slide_batch_total} video đã tạo slide; "
@@ -1701,17 +1804,19 @@ class SlideFlowApp(ctk.CTk):
     def finish_transcripts(self, result: TranscriptBatchResult) -> None:
         self.script_result = result
         self.set_running(False)
-        self.progress_bar.set(
+        self.set_progress(
             (result.total_count - result.pending_count) / result.total_count
             if result.paused_reason else 1
         )
         if result.paused_reason:
+            self.set_tone("stopped")
             self.status_label.configure(text="Tạm dừng vì YouTube giới hạn")
             self.status_detail.configure(
                 text=f"Có {result.saved_count} script; {result.pending_count} video đang chờ. "
                      "Hãy bấm Lấy script lại sau để tiếp tục."
             )
         else:
+            self.set_tone("success")
             self.status_label.configure(text="Đã lấy xong script")
             self.status_detail.configure(
                 text=f"Có {result.saved_count}/{result.total_count} script "
@@ -1731,8 +1836,8 @@ class SlideFlowApp(ctk.CTk):
         self.section_title(self.result_card, "✓", "Script", result.title)
 
         metrics = ctk.CTkFrame(
-            self.result_card, fg_color="#211D1A", corner_radius=10,
-            border_width=1, border_color="#433731",
+            self.result_card, fg_color=self.TOPBAR, corner_radius=10,
+            border_width=1, border_color=self.SURFACE_HOVER,
         )
         metrics.grid(row=1, column=0, sticky="ew", padx=28, pady=(12, 14))
         metrics.grid_columnconfigure((0, 1, 2), weight=1)
@@ -1742,7 +1847,7 @@ class SlideFlowApp(ctk.CTk):
             (result.failed_count, "lỗi khác"),
         )):
             ctk.CTkLabel(
-                metrics, text=str(value), text_color=self.NAVY,
+                metrics, text=str(value), text_color=self.TEXT,
                 font=ctk.CTkFont(size=18, weight="bold"),
             ).grid(row=0, column=column, pady=(14, 0))
             ctk.CTkLabel(
@@ -1769,7 +1874,7 @@ class SlideFlowApp(ctk.CTk):
             corner_radius=10,
             fg_color=self.ORANGE,
             hover_color=self.ORANGE_HOVER,
-            text_color="#FFFFFF",
+            text_color=self.ON_ACCENT,
             command=lambda: self.open_path(result.report_path),
         ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ctk.CTkButton(
@@ -1781,7 +1886,7 @@ class SlideFlowApp(ctk.CTk):
             hover_color=self.SURFACE_HOVER,
             border_width=1,
             border_color=self.BORDER,
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             command=lambda: self.open_path(result.output_dir),
         ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
@@ -1796,10 +1901,10 @@ class SlideFlowApp(ctk.CTk):
         duration = f"{int(result.duration // 60)} phút {int(result.duration % 60)} giây"
         metrics = ctk.CTkFrame(
             self.result_card,
-            fg_color="#211D1A",
+            fg_color=self.TOPBAR,
             corner_radius=10,
             border_width=1,
-            border_color="#433731",
+            border_color=self.SURFACE_HOVER,
         )
         metrics.grid(row=1, column=0, sticky="ew", padx=28, pady=(12, 14))
         metrics.grid_columnconfigure((0, 1, 2), weight=1)
@@ -1809,7 +1914,7 @@ class SlideFlowApp(ctk.CTk):
             (str(result.sampled_count), "mốc đã xem"),
         ]
         for column, (value, label) in enumerate(values):
-            ctk.CTkLabel(metrics, text=value, text_color=self.NAVY, font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=column, pady=(14, 0))
+            ctk.CTkLabel(metrics, text=value, text_color=self.TEXT, font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=column, pady=(14, 0))
             ctk.CTkLabel(metrics, text=label, text_color=self.MUTED, font=ctk.CTkFont(size=12)).grid(row=1, column=column, pady=(0, 14))
 
         preview = ctk.CTkFrame(self.result_card, fg_color="transparent")
@@ -1846,7 +1951,7 @@ class SlideFlowApp(ctk.CTk):
             corner_radius=10,
             fg_color=self.ORANGE,
             hover_color=self.ORANGE_HOVER,
-            text_color="#FFFFFF",
+            text_color=self.ON_ACCENT,
             command=lambda: self.open_path(result.pdf_path),
         ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ctk.CTkButton(
@@ -1858,7 +1963,7 @@ class SlideFlowApp(ctk.CTk):
             hover_color=self.SURFACE_HOVER,
             border_width=1,
             border_color=self.BORDER,
-            text_color=self.NAVY,
+            text_color=self.TEXT,
             command=lambda: self.open_path(result.output_dir),
         ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
