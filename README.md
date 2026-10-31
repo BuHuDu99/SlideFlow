@@ -28,6 +28,17 @@ macOS may therefore require the verification step documented in
 [`prepare_local_app.command`](prepare_local_app.command). The script verifies the
 expected bundle before removing quarantine metadata; it does not disable Gatekeeper.
 
+## Stop slide scanning early
+
+Enter **Kết thúc quét** as `hh:mm:ss` or `mm:ss` before adding a video to
+its queue. For example, `1:30:00` (or `90:00`) scans only the first 90 minutes
+of a two-hour video. Leave it blank or click **Toàn bộ video** to scan all of
+it. A limit beyond the actual video length is clamped to the video length.
+Each queued job retains its own limit; playlist selections use the current
+limit for each selected video. The result reports the scanned duration.
+This limit applies to slide sampling, not the optional full subtitle file
+or the separate transcription actions. CLI: `--end-time 1:30:00`.
+
 ## Updates in the app
 
 Starting with 2.8.0, SlideFlow checks the latest stable GitHub release once at

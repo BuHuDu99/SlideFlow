@@ -17,7 +17,7 @@ from PIL import Image
 import app_update
 from app_version import APP_VERSION
 
-from online_extractor import ExtractionResult, OnlineSlideExtractor, PlaylistResult, PlaylistVideo
+from online_extractor import ExtractionResult, OnlineSlideExtractor, PlaylistResult, PlaylistVideo, parse_end_time
 from slide_history import SlideHistoryStore
 from slide_queue import SequentialSlideQueue, SlideQueueJob
 from slideflow_ipc import LocalIPCServer
@@ -133,6 +133,7 @@ class SlideFlowApp(ctk.CTk):
         self.custom_interval_var = ctk.IntVar(value=7)
         self.custom_threshold_var = ctk.DoubleVar(value=0.92)
         self.quality_var = ctk.StringVar(value="1080p")
+        self.end_time_var = ctk.StringVar(value="")
         self.transcript_var = ctk.BooleanVar(value=True)
         self.cookie_browser_var = ctk.StringVar(value="Chrome")
         with Image.open(self.resource_path("assets/SlideFlowToolbar.png")) as icon:
@@ -559,8 +560,27 @@ class SlideFlowApp(ctk.CTk):
             text_color=self.TEXT, font=ctk.CTkFont(size=13), command=self.paste_url,
         ).grid(row=0, column=1, padx=(8, 0))
 
+        range_row = ctk.CTkFrame(composer, fg_color="transparent")
+        range_row.grid(row=1, column=0, sticky="ew", padx=16, pady=(10, 0))
+        ctk.CTkLabel(
+            range_row, text="Kết thúc quét (hh:mm:ss)", text_color=self.MUTED,
+            font=ctk.CTkFont(size=12),
+        ).grid(row=0, column=0, padx=(0, 10))
+        self.end_time_entry = ctk.CTkEntry(
+            range_row, textvariable=self.end_time_var, placeholder_text="hh:mm:ss",
+            width=122, height=32, fg_color=self.INPUT_BG,
+            border_color=self.BORDER, text_color=self.TEXT,
+        )
+        self.end_time_entry.grid(row=0, column=1)
+        ctk.CTkButton(
+            range_row, text="Toàn bộ video", width=106, height=30,
+            fg_color="transparent", hover_color=self.SURFACE,
+            text_color=self.MUTED, font=ctk.CTkFont(size=12),
+            command=lambda: self.end_time_var.set(""),
+        ).grid(row=0, column=2, padx=(6, 0))
+
         actions = ctk.CTkFrame(composer, fg_color="transparent")
-        actions.grid(row=1, column=0, sticky="ew", padx=12, pady=(12, 12))
+        actions.grid(row=2, column=0, sticky="ew", padx=12, pady=(12, 12))
         actions.grid_columnconfigure(2, weight=1)
         secondary = dict(
             height=36, corner_radius=8, fg_color="transparent",
@@ -1196,6 +1216,7 @@ class SlideFlowApp(ctk.CTk):
             display_title=display_title,
             output_dir=output,
             interval=interval,
+            end_time=parse_end_time(self.end_time_var.get()),
             similarity_threshold=threshold,
             quality=int(self.quality_var.get().removesuffix("p")),
             save_transcript=self.transcript_var.get(),
@@ -1220,6 +1241,12 @@ class SlideFlowApp(ctk.CTk):
             return
         if self.stopping_slide_queue:
             messagebox.showinfo("Đang dừng", "Hãy đợi tác vụ hiện tại dừng hẳn trước khi thêm video mới.")
+            return
+        try:
+            parse_end_time(self.end_time_var.get())
+        except ValueError as error:
+            messagebox.showerror("Mốc kết thúc chưa đúng", str(error))
+            self.end_time_entry.focus_set()
             return
         output = self.prepare_output_directory()
         if output is None:
@@ -1430,7 +1457,11 @@ class SlideFlowApp(ctk.CTk):
             output = self.prepare_output_directory()
             if output is None:
                 return
-            jobs = [self.make_slide_job(video.url, video.title, output) for video in selected_videos]
+            try:
+                jobs = [self.make_slide_job(video.url, video.title, output) for video in selected_videos]
+            except ValueError as error:
+                messagebox.showerror("Mốc kết thúc chưa đúng", str(error), parent=dialog)
+                return
             close_dialog()
             self.enqueue_slide_jobs(jobs)
 
@@ -1504,6 +1535,7 @@ class SlideFlowApp(ctk.CTk):
             video_url=job.video_url,
             output_dir=job.output_dir,
             interval=job.interval,
+            end_time=job.end_time,
             similarity_threshold=job.similarity_threshold,
             quality=job.quality,
             save_transcript=job.save_transcript,
@@ -1658,7 +1690,7 @@ class SlideFlowApp(ctk.CTk):
             ).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=(9, 0))
             ctk.CTkLabel(
                 row,
-                text=status,
+                text=status + (f" • kết thúc {self.duration_label(job.end_time)}" if job.end_time else ""),
                 text_color=self.ACCENT_TEXT if status == "Đang chạy" else self.MUTED,
                 font=ctk.CTkFont(size=11),
                 anchor="w",
@@ -2029,7 +2061,7 @@ class SlideFlowApp(ctk.CTk):
         metrics.grid_columnconfigure((0, 1, 2), weight=1)
         values = [
             (str(result.slide_count), "slide đã chọn"),
-            (duration, "thời lượng"),
+            (duration, "thời lượng quét"),
             (str(result.sampled_count), "mốc đã xem"),
         ]
         for column, (value, label) in enumerate(values):

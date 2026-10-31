@@ -17,6 +17,7 @@ class SlideQueueJob:
     quality: int
     save_transcript: bool
     cookie_browser: Optional[str] = None
+    end_time: Optional[float] = None
 
 
 class SequentialSlideQueue:

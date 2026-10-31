@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import json
 import re
 import shutil
@@ -68,6 +69,23 @@ class SavedFrame:
         return self.sharpness + self.edge_density * 1000.0
 
 
+def parse_end_time(value: str) -> Optional[float]:
+    """Accept hh:mm:ss or mm:ss, with a blank field meaning the full video."""
+    value = value.strip()
+    if not value:
+        return None
+    parts = value.split(":")
+    if len(parts) not in (2, 3) or any(not re.fullmatch(r"[0-9]+", part) for part in parts):
+        raise ValueError("Nhập thời gian dạng hh:mm:ss hoặc mm:ss, ví dụ 1:30:00 hoặc 90:00.")
+    numbers = list(map(int, parts))
+    if numbers[-1] >= 60 or (len(numbers) == 3 and numbers[-2] >= 60):
+        raise ValueError("Giây và phút trong hh:mm:ss phải nhỏ hơn 60.")
+    seconds = sum(number * 60 ** index for index, number in enumerate(reversed(numbers)))
+    if seconds <= 0 or seconds > 365 * 24 * 3600:
+        raise ValueError("Mốc kết thúc phải lớn hơn 0 và không vượt quá 365 ngày.")
+    return float(seconds)
+
+
 class OnlineSlideExtractor:
     """Extract frames from a temporary stream URL without saving the video."""
 
@@ -96,7 +114,11 @@ class OnlineSlideExtractor:
         cookie_browser: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
         cancel_event: Optional[threading.Event] = None,
+        end_time: Optional[float] = None,
     ) -> None:
+        if end_time is not None and (not math.isfinite(end_time) or end_time <= 0):
+            raise ValueError("Mốc kết thúc phải là số giây lớn hơn 0.")
+        self.end_time = end_time
         self.video_url = video_url.strip()
         self.output_root = Path(output_dir).expanduser()
         self.interval = max(2, int(interval))
@@ -660,6 +682,10 @@ class OnlineSlideExtractor:
         info = self.resolve_video()
         title = self.safe_name(info.get("title") or "YouTube Slides")
         duration = float(info["duration"])
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("Thời lượng video không hợp lệ.")
+        if self.end_time is not None:
+            duration = min(duration, self.end_time)
         stamp = datetime.now().strftime("%Y-%m-%d %H.%M.%S.%f")
         job_dir = self.output_root / f"{title} - {stamp}"
         slides_dir = job_dir / "slides"
@@ -673,7 +699,7 @@ class OnlineSlideExtractor:
             if dash_stream else None
         )
         end = max(0.5, duration - 0.5)
-        timestamps = np.arange(0.5, end + 0.01, self.interval).tolist()
+        timestamps = [value for value in np.arange(0.5, end + 0.01, self.interval).tolist() if value < duration]
         if not timestamps:
             timestamps = [0.0]
 
@@ -748,6 +774,7 @@ def main() -> None:
     parser.add_argument("url", help="YouTube video URL")
     parser.add_argument("--output", default=str(Path.home() / "Documents" / "SlideFlow"))
     parser.add_argument("--interval", type=int, default=8)
+    parser.add_argument("--end-time", type=parse_end_time, default=None, help="Stop slide scanning at hh:mm:ss or mm:ss")
     parser.add_argument("--threshold", type=float, default=0.90)
     parser.add_argument("--quality", type=int, default=1080)
     parser.add_argument("--no-transcript", action="store_true")
@@ -761,6 +788,7 @@ def main() -> None:
         args.url,
         args.output,
         interval=args.interval,
+        end_time=args.end_time,
         similarity_threshold=args.threshold,
         quality=args.quality,
         save_transcript=not args.no_transcript,
