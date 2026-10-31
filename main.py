@@ -98,6 +98,12 @@ class SlideFlowApp(ctk.CTk):
         self.geometry("1180x780")
         self.minsize(1000, 740)
         self.configure(fg_color=self.BG)
+        if sys.platform == "darwin":
+            try:
+                self.tk.call("::tk::unsupported::MacWindowStyle", "appearance", self._w, "dark")
+            except Exception:
+                # Older Tk versions may not expose per-window appearance.
+                pass
         self.cancel_event = threading.Event()
         self.result: ExtractionResult | None = None
         self.script_result: TranscriptBatchResult | None = None
@@ -441,110 +447,69 @@ class SlideFlowApp(ctk.CTk):
         }
 
     def build_hero(self, main) -> None:
-        hero = ctk.CTkFrame(main, fg_color="transparent")
-        hero.grid(row=0, column=0, sticky="ew", padx=(28, 32), pady=(30, 20))
-        hero.grid_columnconfigure(0, weight=1)
+        header = ctk.CTkFrame(main, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=(28, 32), pady=(24, 20))
+        header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            hero,
-            text="Biến bài giảng YouTube thành slide",
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=26, weight="bold"),
-            anchor="w",
-        ).grid(row=0, column=0, columnspan=3, sticky="ew")
+            header, text="Tạo slide từ YouTube", anchor="w",
+            text_color=self.TEXT, font=ctk.CTkFont(size=23, weight="bold"),
+        ).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(
-            hero,
-            text="Dán liên kết video hoặc playlist. SlideFlow chỉ giữ những khung hình có nội dung mới.",
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=13),
-            anchor="w",
-        ).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(4, 16))
+            header, text="Video hoặc playlist → PDF slide và lời giảng", anchor="w",
+            text_color=self.MUTED, font=ctk.CTkFont(size=12),
+        ).grid(row=1, column=0, sticky="w", pady=(2, 16))
 
-        self.url_entry = ctk.CTkEntry(
-            hero,
-            height=52,
-            corner_radius=10,
-            border_width=1,
-            border_color=self.BORDER,
-            fg_color=self.INPUT_BG,
-            text_color=self.TEXT,
-            placeholder_text="https://www.youtube.com/watch?v=…",
-            placeholder_text_color=self.PLACEHOLDER,
-            font=ctk.CTkFont(size=15),
+        composer = ctk.CTkFrame(
+            header, fg_color=self.CARD, corner_radius=14,
+            border_width=1, border_color=self.BORDER,
         )
-        self.url_entry.grid(row=2, column=0, sticky="ew", padx=(0, 10))
+        composer.grid(row=2, column=0, sticky="ew")
+        composer.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            composer, text="LIÊN KẾT YOUTUBE", anchor="w",
+            text_color=self.MUTED, font=ctk.CTkFont(size=10, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=16, pady=(12, 4))
+        link_row = ctk.CTkFrame(composer, fg_color="transparent")
+        link_row.grid(row=1, column=0, sticky="ew", padx=12)
+        link_row.grid_columnconfigure(0, weight=1)
+        self.url_entry = ctk.CTkEntry(
+            link_row, height=44, corner_radius=8, border_width=1,
+            border_color=self.BORDER, fg_color=self.INPUT_BG,
+            text_color=self.TEXT, placeholder_text="Dán liên kết video hoặc playlist…",
+            placeholder_text_color=self.PLACEHOLDER, font=ctk.CTkFont(size=14),
+        )
+        self.url_entry.grid(row=0, column=0, sticky="ew")
         ctk.CTkButton(
-            hero,
-            text="Dán",
-            width=72,
-            height=52,
-            corner_radius=10,
-            fg_color=self.SURFACE,
-            hover_color=self.SURFACE_HOVER,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=14),
-            command=self.paste_url,
-        ).grid(row=2, column=1, padx=(0, 10))
+            link_row, text="Dán", width=64, height=44, corner_radius=8,
+            fg_color=self.SURFACE, hover_color=self.SURFACE_HOVER,
+            text_color=self.TEXT, font=ctk.CTkFont(size=13), command=self.paste_url,
+        ).grid(row=0, column=1, padx=(8, 0))
+
+        actions = ctk.CTkFrame(composer, fg_color="transparent")
+        actions.grid(row=2, column=0, sticky="ew", padx=12, pady=(12, 12))
+        actions.grid_columnconfigure(2, weight=1)
+        secondary = dict(
+            height=36, corner_radius=8, fg_color="transparent",
+            hover_color=self.SURFACE, text_color=self.MUTED,
+            font=ctk.CTkFont(size=12),
+        )
+        self.script_button = ctk.CTkButton(
+            actions, text="Lấy phụ đề", width=94,
+            command=self.start_transcripts, **secondary,
+        )
+        self.script_button.grid(row=0, column=0, sticky="w")
+        self.audio_script_button = ctk.CTkButton(
+            actions, text="Chép âm thanh", width=116,
+            command=lambda: self.start_transcripts(audio=True), **secondary,
+        )
+        self.audio_script_button.grid(row=0, column=1, sticky="w", padx=(4, 0))
         self.start_button = ctk.CTkButton(
-            hero,
-            text="Tạo slide",
-            width=150,
-            height=52,
-            corner_radius=10,
-            fg_color=self.ORANGE,
-            hover_color=self.ORANGE_HOVER,
-            text_color=self.ON_ACCENT,
-            font=ctk.CTkFont(size=15, weight="bold"),
+            actions, text="Tạo slide", width=138, height=38, corner_radius=8,
+            fg_color=self.ORANGE, hover_color=self.ORANGE_HOVER,
+            text_color=self.ON_ACCENT, font=ctk.CTkFont(size=14, weight="bold"),
             command=self.start_extraction,
         )
-        self.start_button.grid(row=2, column=2)
-
-        extras = ctk.CTkFrame(hero, fg_color="transparent")
-        extras.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        extras.grid_columnconfigure(3, weight=1)
-        ctk.CTkLabel(
-            extras,
-            text="Chỉ cần lời giảng?",
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=12),
-        ).grid(row=0, column=0, padx=(0, 10))
-        self.script_button = ctk.CTkButton(
-            extras,
-            text="Lấy phụ đề",
-            width=96,
-            height=30,
-            corner_radius=8,
-            fg_color="transparent",
-            hover_color=self.SURFACE,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=12),
-            command=self.start_transcripts,
-        )
-        self.script_button.grid(row=0, column=1, padx=(0, 8))
-        self.audio_script_button = ctk.CTkButton(
-            extras,
-            text="Chép từ âm thanh",
-            width=128,
-            height=30,
-            corner_radius=8,
-            fg_color="transparent",
-            hover_color=self.SURFACE,
-            border_width=1,
-            border_color=self.BORDER,
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=12),
-            command=lambda: self.start_transcripts(audio=True),
-        )
-        self.audio_script_button.grid(row=0, column=2)
-        ctk.CTkLabel(
-            extras,
-            text="Enter để bắt đầu  ·  Esc để dừng",
-            text_color=self.FAINT,
-            font=ctk.CTkFont(size=11),
-        ).grid(row=0, column=4, sticky="e")
+        self.start_button.grid(row=0, column=3, sticky="e", padx=(12, 0))
 
     def build_status_card(self, body) -> None:
         self.action_card = self.card(body)

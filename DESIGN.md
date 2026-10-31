@@ -154,6 +154,9 @@ inputs, and 6px for small tags.
 
 ## Components
 
+- **Native title bar:** on macOS, request Tk's per-window dark appearance
+  so the native title bar matches the dark content without changing the
+  system appearance. Preserve the native window controls.
 - **Layout:** a 300px sidebar (`topbar` background) holds every setting, and
   the main column holds the task. Settings never share a row with the
   primary action.
@@ -162,9 +165,11 @@ inputs, and 6px for small tags.
   selection) so every choice is visible. Longer lists use a dropdown. The
   save location, quick links and privacy note sit at the bottom under a
   divider.
-- **Hero:** a 26px title, a one-line explanation, a 52px URL field,
-  "Dán" (secondary) and "Tạo slide" (primary), then the transcript actions
-  as small ghost buttons.
+- **Header:** a compact 23px title and short explanation introduce a bordered
+  input card. Its 44px URL field shares a row only with "Dán"; a separate
+  action row keeps transcript buttons on the left and "Tạo slide" on the
+  right. Keep long descriptions and keyboard hints out of this row so it
+  fits the 1000px minimum window width.
 - **Status card:** the badge glyph and color follow `STATUS_TONES`:
   `▶` idle, `●` running, `✓` success, `!` error, `■` stopped. Set the tone
   through `set_tone()` and the progress through `set_progress()`. Do not call
