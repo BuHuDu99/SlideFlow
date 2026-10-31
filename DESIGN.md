@@ -165,7 +165,7 @@ inputs, and 6px for small tags.
   selection) so every choice is visible. Longer lists use a dropdown. The
   save location, quick links and privacy note sit at the bottom under a
   divider.
-- **Header:** a compact 23px title and short explanation introduce a bordered
+- **Header:** a compact 23px title introduces a bordered
   input card. Its 44px URL field shares a row only with "Dán"; a separate
   action row keeps transcript buttons on the left and "Tạo slide" on the
   right. Keep long descriptions and keyboard hints out of this row so it
@@ -174,9 +174,8 @@ inputs, and 6px for small tags.
   `▶` idle, `●` running, `✓` success, `!` error, `■` stopped. Set the tone
   through `set_tone()` and the progress through `set_progress()`. Do not call
   the widgets directly.
-- **Status card at idle:** shows three numbered onboarding steps in place of
-  an empty progress bar, and hides "Dừng". The progress bar takes over once
-  the first job starts.
+- **Status card at idle:** stays hidden until work starts. Avoid redundant
+  onboarding steps, taglines and explanatory captions around obvious controls.
 - **History rows:** an undivided list with hairline separators. Each row
   has a `PDF` tag, the title, a relative time ("Hôm nay", "Hôm qua",
   "N ngày trước"), a ghost "Thư mục" button and a secondary "Mở PDF"

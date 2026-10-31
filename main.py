@@ -225,12 +225,6 @@ class SlideFlowApp(ctk.CTk):
             text_color=self.TEXT,
             font=ctk.CTkFont(size=19, weight="bold"),
         ).grid(row=0, column=1, sticky="sw")
-        ctk.CTkLabel(
-            brand,
-            text="Bài giảng YouTube → slide PDF",
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=11),
-        ).grid(row=1, column=1, sticky="nw")
 
         preset_group = self.sidebar_group(sidebar, 1, "Mức chi tiết")
         self.preset = ctk.CTkSegmentedButton(
@@ -408,13 +402,6 @@ class SlideFlowApp(ctk.CTk):
                 font=ctk.CTkFont(size=12),
                 command=command,
             ).grid(row=3, column=column, sticky="ew", padx=(0, 4) if column == 0 else (4, 0), pady=(8, 0))
-        ctk.CTkLabel(
-            save_group,
-            text="✓  Xử lý trực tuyến, không lưu video đầy đủ",
-            text_color=self.FAINT,
-            font=ctk.CTkFont(size=11),
-            anchor="w",
-        ).grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
 
     def sidebar_group(self, sidebar, row: int, title: str, note: str = "") -> ctk.CTkFrame:
         group = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -454,23 +441,16 @@ class SlideFlowApp(ctk.CTk):
             header, text="Tạo slide từ YouTube", anchor="w",
             text_color=self.TEXT, font=ctk.CTkFont(size=23, weight="bold"),
         ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            header, text="Video hoặc playlist → PDF slide và lời giảng", anchor="w",
-            text_color=self.MUTED, font=ctk.CTkFont(size=12),
-        ).grid(row=1, column=0, sticky="w", pady=(2, 16))
 
         composer = ctk.CTkFrame(
             header, fg_color=self.CARD, corner_radius=14,
             border_width=1, border_color=self.BORDER,
         )
-        composer.grid(row=2, column=0, sticky="ew")
+        composer.grid(row=1, column=0, sticky="ew", pady=(14, 0))
         composer.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            composer, text="LIÊN KẾT YOUTUBE", anchor="w",
-            text_color=self.MUTED, font=ctk.CTkFont(size=10, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", padx=16, pady=(12, 4))
+
         link_row = ctk.CTkFrame(composer, fg_color="transparent")
-        link_row.grid(row=1, column=0, sticky="ew", padx=12)
+        link_row.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 0))
         link_row.grid_columnconfigure(0, weight=1)
         self.url_entry = ctk.CTkEntry(
             link_row, height=44, corner_radius=8, border_width=1,
@@ -486,7 +466,7 @@ class SlideFlowApp(ctk.CTk):
         ).grid(row=0, column=1, padx=(8, 0))
 
         actions = ctk.CTkFrame(composer, fg_color="transparent")
-        actions.grid(row=2, column=0, sticky="ew", padx=12, pady=(12, 12))
+        actions.grid(row=1, column=0, sticky="ew", padx=12, pady=(12, 12))
         actions.grid_columnconfigure(2, weight=1)
         secondary = dict(
             height=36, corner_radius=8, fg_color="transparent",
@@ -536,7 +516,7 @@ class SlideFlowApp(ctk.CTk):
         self.status_label.grid(row=0, column=1, padx=(0, 16), pady=(20, 0), sticky="ew")
         self.status_detail = ctk.CTkLabel(
             self.action_card,
-            text="Ba bước là xong — thiết lập ở cột trái đã có sẵn giá trị khuyên dùng.",
+            text="",
             text_color=self.MUTED,
             justify="left",
             anchor="w",
@@ -559,35 +539,6 @@ class SlideFlowApp(ctk.CTk):
         self.cancel_button.grid(row=0, column=2, rowspan=2, padx=(0, 22), pady=(20, 0))
         self.cancel_button.grid_remove()
 
-        # Idle state shows how to start; the progress bar takes this slot once
-        # the first job runs, so an empty bar never reads as a stalled job.
-        self.onboarding_steps = ctk.CTkFrame(self.action_card, fg_color="transparent")
-        self.onboarding_steps.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(0, 22), pady=(14, 20))
-        self.onboarding_steps.grid_columnconfigure((0, 1, 2), weight=1, uniform="step")
-        for column, (number, text) in enumerate((
-            ("1", "Dán liên kết"),
-            ("2", "Chọn mức chi tiết"),
-            ("3", "Bấm Tạo slide"),
-        )):
-            step = ctk.CTkFrame(self.onboarding_steps, fg_color=self.PANEL, corner_radius=10)
-            step.grid(row=0, column=column, sticky="ew", padx=(0, 8) if column < 2 else 0)
-            ctk.CTkLabel(
-                step,
-                text=number,
-                width=24,
-                height=24,
-                corner_radius=12,
-                fg_color=self.ACCENT_SOFT,
-                text_color=self.ACCENT_TEXT,
-                font=ctk.CTkFont(size=11, weight="bold"),
-            ).grid(row=0, column=0, padx=(12, 8), pady=12)
-            ctk.CTkLabel(
-                step,
-                text=text,
-                text_color=self.TEXT,
-                font=ctk.CTkFont(size=12),
-            ).grid(row=0, column=1, sticky="w", padx=(0, 10))
-
         self.progress_bar = ctk.CTkProgressBar(
             self.action_card,
             height=8,
@@ -598,11 +549,11 @@ class SlideFlowApp(ctk.CTk):
         self.progress_bar.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(0, 22), pady=(16, 22))
         self.progress_bar.set(0)
         self.progress_bar.grid_remove()
+        self.action_card.grid_remove()
 
     def show_progress_area(self) -> None:
-        if self.onboarding_steps.winfo_manager():
-            self.onboarding_steps.grid_remove()
-            self.progress_bar.grid()
+        self.action_card.grid()
+        self.progress_bar.grid()
 
     def refresh_output_button(self) -> None:
         if not hasattr(self, "output_button"):
