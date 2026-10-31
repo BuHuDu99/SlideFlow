@@ -3,10 +3,13 @@
 import sys
 from pathlib import Path
 
+from app_version import APP_VERSION
+
 from PyInstaller.utils.hooks import collect_all
 
 
 datas = [
+    (str(Path("scripts/install_update.sh").resolve()), "scripts"),
     (str(Path("assets/SlideFlow.png").resolve()), "assets"),
     (str(Path("assets/SlideFlowToolbar.png").resolve()), "assets"),
 ]
@@ -63,8 +66,8 @@ app = BUNDLE(
     bundle_identifier="com.buihuuduc.slideflow",
     info_plist={
         "CFBundleDisplayName": "SlideFlow",
-        "CFBundleShortVersionString": "2.7.3",
-        "CFBundleVersion": "2.7.3",
+        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleVersion": APP_VERSION,
         "LSMinimumSystemVersion": "13.0",
         "NSHighResolutionCapable": True,
         "NSHumanReadableCopyright": (

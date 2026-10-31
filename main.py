@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
 import sys
 import threading
 from datetime import datetime
@@ -12,6 +13,9 @@ from urllib.parse import parse_qs, urlparse
 
 import customtkinter as ctk
 from PIL import Image
+
+import app_update
+from app_version import APP_VERSION
 
 from online_extractor import ExtractionResult, OnlineSlideExtractor, PlaylistResult, PlaylistVideo
 from slide_history import SlideHistoryStore
@@ -138,6 +142,9 @@ class SlideFlowApp(ctk.CTk):
             dark_image=brand_icon,
             size=(36, 36),
         )
+        self.update_release = None
+        self.update_checking = False
+        self.update_installing = False
         self.build_ui()
         self.bind("<Return>", self.start_from_keyboard)
         self.bind("<Escape>", lambda _event: self.cancel_extraction())
@@ -146,6 +153,7 @@ class SlideFlowApp(ctk.CTk):
         self.bind("<Next>", lambda _event: self.scroll_page(1))
         self.install_window_lifecycle()
         self.after_idle(lambda: self.body._parent_canvas.yview_moveto(0))
+        self.after(1800, self.check_app_update)
         try:
             self.ipc_server.start()
         except OSError:
@@ -402,6 +410,92 @@ class SlideFlowApp(ctk.CTk):
                 font=ctk.CTkFont(size=12),
                 command=command,
             ).grid(row=3, column=column, sticky="ew", padx=(0, 4) if column == 0 else (4, 0), pady=(8, 0))
+
+        self.update_button = ctk.CTkButton(
+            save_group, text=f"v{APP_VERSION} · Kiểm tra cập nhật", height=28,
+            fg_color="transparent", hover_color=self.SURFACE,
+            text_color=self.MUTED, font=ctk.CTkFont(size=11),
+            command=self.on_update_click,
+        )
+        self.update_button.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+
+    def check_app_update(self, manual: bool = False) -> None:
+        if self.update_checking or self.update_installing:
+            return
+        self.update_checking = True
+        self.update_button.configure(text="Đang kiểm tra…", state="disabled")
+
+        def check() -> None:
+            try:
+                release = app_update.check_release()
+                self.after(0, self.finish_update_check, release, None, manual)
+            except Exception as error:
+                try:
+                    self.after(0, self.finish_update_check, None, str(error), manual)
+                except RuntimeError:
+                    pass
+
+        threading.Thread(target=check, daemon=True).start()
+
+    def finish_update_check(self, release, error, manual: bool) -> None:
+        self.update_checking = False
+        self.update_release = release
+        self.update_button.configure(
+            state="normal",
+            text=f"Cập nhật {release.version}" if release else f"v{APP_VERSION} · Kiểm tra cập nhật",
+        )
+        if manual and error:
+            messagebox.showerror("Cập nhật", f"Không kiểm tra được phiên bản mới.\n{error}")
+        elif manual and not release:
+            messagebox.showinfo("Cập nhật", f"SlideFlow {APP_VERSION} đang là phiên bản mới nhất.")
+
+    def on_update_click(self) -> None:
+        if self.update_release is None:
+            self.check_app_update(manual=True)
+            return
+        if self.worker_running or self.playlist_loading or self.slide_jobs.active or len(self.slide_jobs):
+            messagebox.showinfo("Cập nhật", "Hãy đợi tác vụ và hàng chờ hoàn tất trước khi cập nhật.")
+            return
+        destination = app_update.installed_app()
+        if destination is None:
+            messagebox.showinfo("Cập nhật", "Hãy dùng bản SlideFlow.app đã cài để cập nhật.")
+            return
+        if not messagebox.askyesno("Cập nhật SlideFlow", f"Cài phiên bản {self.update_release.version}? SlideFlow sẽ tải bản mới và tự khởi động lại."):
+            return
+        self.update_installing = True
+        self.update_button.configure(text="Đang tải bản mới…", state="disabled")
+        self.update_slide_start_button()
+        self.script_button.configure(state="disabled")
+        self.audio_script_button.configure(state="disabled")
+        release = self.update_release
+
+        def prepare() -> None:
+            try:
+                stage = app_update.prepare_update(release, destination)
+            except Exception as error:
+                self.after(0, self.finish_app_update, None, destination, str(error))
+            else:
+                self.after(0, self.finish_app_update, stage, destination, None)
+
+        threading.Thread(target=prepare, daemon=False).start()
+
+    def finish_app_update(self, stage, destination, error) -> None:
+        if error is None:
+            try:
+                app_update.launch_installer(stage, destination)
+            except Exception as failure:
+                shutil.rmtree(stage, ignore_errors=True)
+                error = str(failure)
+            else:
+                self.update_installing = False
+                self.quit_application()
+                return
+        self.update_installing = False
+        self.update_button.configure(text="Thử cập nhật lại", state="normal")
+        self.update_slide_start_button()
+        self.script_button.configure(state="normal")
+        self.audio_script_button.configure(state="normal")
+        messagebox.showerror("Không cập nhật được", error)
 
     def sidebar_group(self, sidebar, row: int, title: str, note: str = "") -> ctk.CTkFrame:
         group = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -762,6 +856,9 @@ class SlideFlowApp(ctk.CTk):
         self.after_idle(self.focus_force)
 
     def quit_application(self, _event=None) -> str:
+        if getattr(self, "update_installing", False):
+            messagebox.showinfo("Cập nhật", "Đang chuẩn bị cập nhật. Hãy đợi quá trình này hoàn tất.")
+            return "break"
         self.cancel_event.set()
         if animation := getattr(self, "progress_animation", None):
             self.after_cancel(animation)
@@ -1114,6 +1211,9 @@ class SlideFlowApp(ctk.CTk):
         return f"Video {video_id}" if video_id else "Video YouTube"
 
     def start_extraction(self) -> None:
+        if self.update_installing:
+            messagebox.showinfo("Cập nhật", "Đang cập nhật SlideFlow. Hãy đợi app khởi động lại.")
+            return
         url = self.url_entry.get().strip()
         if not self.valid_url(url):
             messagebox.showerror("Liên kết chưa đúng", "Hãy nhập một liên kết YouTube hợp lệ.")
@@ -1360,6 +1460,9 @@ class SlideFlowApp(ctk.CTk):
         dialog.after_idle(dialog.focus_force)
 
     def enqueue_slide_jobs(self, jobs: list[SlideQueueJob]) -> None:
+        if self.update_installing:
+            messagebox.showinfo("Cập nhật", "Đang cập nhật SlideFlow. Hãy đợi app khởi động lại.")
+            return
         if not jobs:
             return
         new_batch = (
@@ -1411,6 +1514,9 @@ class SlideFlowApp(ctk.CTk):
         threading.Thread(target=self.run_extraction, args=(extractor,), daemon=True).start()
 
     def start_transcripts(self, audio: bool = False) -> None:
+        if self.update_installing:
+            messagebox.showinfo("Cập nhật", "Đang cập nhật SlideFlow. Hãy đợi app khởi động lại.")
+            return
         url = self.url_entry.get().strip()
         if not self.valid_url(url):
             messagebox.showerror("Liên kết chưa đúng", "Hãy nhập một liên kết YouTube hợp lệ.")
@@ -1486,7 +1592,9 @@ class SlideFlowApp(ctk.CTk):
     def update_slide_start_button(self) -> None:
         if not hasattr(self, "start_button"):
             return
-        if self.stopping_slide_queue:
+        if self.update_installing:
+            self.start_button.configure(text="Đang cập nhật…", state="disabled")
+        elif self.stopping_slide_queue:
             self.start_button.configure(text="Đang dừng…", state="disabled")
         elif self.playlist_loading:
             self.start_button.configure(text="Đọc playlist…", state="disabled")

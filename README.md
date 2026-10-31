@@ -28,6 +28,31 @@ macOS may therefore require the verification step documented in
 [`prepare_local_app.command`](prepare_local_app.command). The script verifies the
 expected bundle before removing quarantine metadata; it does not disable Gatekeeper.
 
+## Updates in the app
+
+Starting with 2.8.0, SlideFlow checks the latest stable GitHub release once at
+launch. Click the version button at the bottom of the sidebar to check again.
+When a newer version is available, click **Cập nhật**, then confirm. SlideFlow
+downloads the DMG, checks its SHA-256 against GitHub's asset digest, verifies
+the bundle identifier, version, arm64 binary and code signature, and restarts
+after replacing the app. Active extraction jobs must finish first.
+
+The updater needs write access to the app's containing directory. Install in
+`~/Applications` if `/Applications` requires an administrator. A failed download
+leaves the current app intact; a failed replacement restores the old app.
+Temporary downloads, mounted volumes and staging copies are removed after the
+operation. User history, models and generated files stay outside the app bundle.
+
+Devices running 2.7.3 must install 2.8.0 manually once. That older application
+does not contain an updater and cannot acquire this feature remotely by itself.
+This build supports Apple Silicon Macs only.
+
+To publish a new update, change `APP_VERSION` in `app_version.py`, commit and
+push the source, then run `./scripts/publish_release.command` with the packaging
+environment installed. It builds and uploads `SlideFlow.dmg` as a stable release
+tagged with that version; GitHub supplies the SHA-256 asset digest. Do not reuse
+a published version number. Prereleases and drafts are not offered in the app.
+
 ## Run from source
 
 Requirements:
