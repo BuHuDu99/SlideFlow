@@ -34,8 +34,11 @@ Enter **Kết thúc quét** as `hh:mm:ss` or `mm:ss` before adding a video to
 its queue. For example, `1:30:00` (or `90:00`) scans only the first 90 minutes
 of a two-hour video. Leave it blank or click **Toàn bộ video** to scan all of
 it. A limit beyond the actual video length is clamped to the video length.
-Each queued job retains its own limit; playlist selections use the current
-limit for each selected video. The result reports the scanned duration.
+Each queued job retains its own limit. In the playlist dialog every video
+has an independent end-time field, initially blank. **Áp dụng mốc kết thúc
+cho tất cả** is off by default; enabling it uses the shared field for selected
+videos. Disabling it restores the individual fields without clearing them.
+A blank shared or individual field means the full video. The result reports the scanned duration.
 This limit applies to slide sampling, not the optional full subtitle file
 or the separate transcription actions. CLI: `--end-time 1:30:00`.
 

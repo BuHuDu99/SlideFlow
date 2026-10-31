@@ -1205,7 +1205,7 @@ class SlideFlowApp(ctk.CTk):
             "message": "Đã thêm video vào hàng chờ SlideFlow.",
         }
 
-    def make_slide_job(self, video_url: str, display_title: str, output: str) -> SlideQueueJob:
+    def make_slide_job(self, video_url: str, display_title: str, output: str, *, end_time_text: str | None = None) -> SlideQueueJob:
         interval, threshold = self.processing_settings(
             self.preset_var.get(),
             self.custom_interval_var.get(),
@@ -1216,7 +1216,7 @@ class SlideFlowApp(ctk.CTk):
             display_title=display_title,
             output_dir=output,
             interval=interval,
-            end_time=parse_end_time(self.end_time_var.get()),
+            end_time=parse_end_time(self.end_time_var.get() if end_time_text is None else end_time_text),
             similarity_threshold=threshold,
             quality=int(self.quality_var.get().removesuffix("p")),
             save_transcript=self.transcript_var.get(),
@@ -1242,12 +1242,13 @@ class SlideFlowApp(ctk.CTk):
         if self.stopping_slide_queue:
             messagebox.showinfo("Đang dừng", "Hãy đợi tác vụ hiện tại dừng hẳn trước khi thêm video mới.")
             return
-        try:
-            parse_end_time(self.end_time_var.get())
-        except ValueError as error:
-            messagebox.showerror("Mốc kết thúc chưa đúng", str(error))
-            self.end_time_entry.focus_set()
-            return
+        if not self.is_playlist_url(url):
+            try:
+                parse_end_time(self.end_time_var.get())
+            except ValueError as error:
+                messagebox.showerror("Mốc kết thúc chưa đúng", str(error))
+                self.end_time_entry.focus_set()
+                return
         output = self.prepare_output_directory()
         if output is None:
             return
@@ -1325,8 +1326,8 @@ class SlideFlowApp(ctk.CTk):
         dialog = ctk.CTkToplevel(self)
         self.playlist_dialog = dialog
         dialog.title("Chọn video trong playlist")
-        dialog.geometry("780x620")
-        dialog.minsize(620, 460)
+        dialog.geometry("880x680")
+        dialog.minsize(720, 520)
         dialog.configure(fg_color=self.BG)
         dialog.transient(self)
         dialog.grid_columnconfigure(0, weight=1)
@@ -1352,6 +1353,27 @@ class SlideFlowApp(ctk.CTk):
             anchor="w",
         ).grid(row=1, column=0, sticky="ew", padx=22, pady=(0, 16))
 
+        shared_enabled = ctk.BooleanVar(master=dialog, value=False)
+        shared_value = ctk.StringVar(master=dialog, value=self.end_time_var.get())
+        time_controls = ctk.CTkFrame(heading, fg_color="transparent")
+        time_controls.grid(row=2, column=0, sticky="ew", padx=22, pady=(0, 14))
+        shared_check = ctk.CTkCheckBox(
+            time_controls, text="Áp dụng mốc kết thúc cho tất cả", variable=shared_enabled,
+            fg_color=self.ORANGE, hover_color=self.ORANGE_HOVER,
+            text_color=self.TEXT, font=ctk.CTkFont(size=12),
+        )
+        shared_check.grid(row=0, column=0, sticky="w", padx=(0, 14))
+        shared_entry = ctk.CTkEntry(
+            time_controls, textvariable=shared_value, width=122, height=32,
+            state="disabled", fg_color=self.INPUT_BG, border_color=self.BORDER,
+            text_color=self.TEXT,
+        )
+        shared_entry.grid(row=0, column=1)
+        ctk.CTkLabel(
+            time_controls, text="hh:mm:ss · trống = hết video", text_color=self.MUTED,
+            font=ctk.CTkFont(size=11),
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
         video_list = ctk.CTkScrollableFrame(
             dialog,
             fg_color="transparent",
@@ -1365,6 +1387,8 @@ class SlideFlowApp(ctk.CTk):
         self.playlist_scroll_canvas = video_list._parent_canvas
 
         selections: list[tuple[PlaylistVideo, ctk.BooleanVar]] = []
+        selection_boxes = []
+        time_fields: dict[int, tuple[ctk.StringVar, ctk.CTkEntry]] = {}
         for row_number, video in enumerate(result.videos):
             variable = ctk.BooleanVar(value=False)
             selections.append((video, variable))
@@ -1389,6 +1413,7 @@ class SlideFlowApp(ctk.CTk):
                 border_color=self.BORDER,
             )
             checkbox.grid(row=0, column=0, rowspan=2, padx=(14, 8), pady=13)
+            selection_boxes.append(checkbox)
             ctk.CTkLabel(
                 row,
                 text=f"{video.position:03d}. {video.title}",
@@ -1396,7 +1421,7 @@ class SlideFlowApp(ctk.CTk):
                 font=ctk.CTkFont(size=13, weight="bold"),
                 anchor="w",
                 justify="left",
-                wraplength=500,
+                wraplength=400,
             ).grid(row=0, column=1, sticky="ew", padx=(0, 12), pady=(10, 1))
             metadata = video.video_id
             if duration := self.duration_label(video.duration):
@@ -1408,6 +1433,26 @@ class SlideFlowApp(ctk.CTk):
                 font=ctk.CTkFont(size=11),
                 anchor="w",
             ).grid(row=1, column=1, sticky="ew", padx=(0, 12), pady=(0, 10))
+
+            time_value = ctk.StringVar(master=dialog, value="")
+            ctk.CTkLabel(
+                row, text="Kết thúc quét", text_color=self.MUTED,
+                font=ctk.CTkFont(size=11),
+            ).grid(row=0, column=2, sticky="w", padx=(0, 14), pady=(10, 0))
+            time_entry = ctk.CTkEntry(
+                row, textvariable=time_value, width=116, height=30,
+                fg_color=self.INPUT_BG, border_color=self.BORDER, text_color=self.TEXT,
+            )
+            time_entry.grid(row=1, column=2, sticky="e", padx=(0, 14), pady=(2, 10))
+            time_fields[video.position] = (time_value, time_entry)
+
+        def toggle_shared_time() -> None:
+            shared = shared_enabled.get()
+            shared_entry.configure(state="normal" if shared else "disabled")
+            for _variable, entry in time_fields.values():
+                entry.configure(state="disabled" if shared else "normal")
+
+        shared_check.configure(command=toggle_shared_time)
 
         footer = ctk.CTkFrame(dialog, fg_color=self.TOPBAR, corner_radius=0)
         footer.grid(row=2, column=0, sticky="ew")
@@ -1433,12 +1478,13 @@ class SlideFlowApp(ctk.CTk):
             )
             start_button.configure(text=f"Bắt đầu ({selected_count})" if selected_count else "Bắt đầu")
 
-        for _video, variable in selections:
-            variable.trace_add("write", lambda *_args: update_selection_count())
+        for checkbox in selection_boxes:
+            checkbox.configure(command=update_selection_count)
 
         def select_all(selected: bool) -> None:
             for _video, variable in selections:
                 variable.set(selected)
+            update_selection_count()
 
         def close_dialog() -> None:
             self.playlist_dialog = None
@@ -1457,11 +1503,18 @@ class SlideFlowApp(ctk.CTk):
             output = self.prepare_output_directory()
             if output is None:
                 return
-            try:
-                jobs = [self.make_slide_job(video.url, video.title, output) for video in selected_videos]
-            except ValueError as error:
-                messagebox.showerror("Mốc kết thúc chưa đúng", str(error), parent=dialog)
-                return
+            jobs = []
+            for video in selected_videos:
+                value, entry = time_fields[video.position]
+                try:
+                    jobs.append(self.make_slide_job(
+                        video.url, video.title, output,
+                        end_time_text=shared_value.get() if shared_enabled.get() else value.get(),
+                    ))
+                except ValueError as error:
+                    messagebox.showerror("Mốc kết thúc chưa đúng", f"Video {video.position}: {error}", parent=dialog)
+                    (shared_entry if shared_enabled.get() else entry).focus_set()
+                    return
             close_dialog()
             self.enqueue_slide_jobs(jobs)
 

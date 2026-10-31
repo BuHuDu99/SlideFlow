@@ -81,6 +81,12 @@ class OnlineExtractorTests(unittest.TestCase):
         second = SlideFlowApp.make_slide_job(app, "url2", "Video2", "/tmp")
         self.assertEqual(first.end_time, 5400)
         self.assertIsNone(second.end_time)
+        # Explicit playlist fields override the main field, including blanks.
+        state["end"] = "bad"
+        blank = SlideFlowApp.make_slide_job(app, "url3", "Video3", "/tmp", end_time_text="")
+        custom = SlideFlowApp.make_slide_job(app, "url4", "Video4", "/tmp", end_time_text="45:00")
+        self.assertIsNone(blank.end_time)
+        self.assertEqual(custom.end_time, 2700)
         state["end"] = "bad"
         with self.assertRaises(ValueError):
             SlideFlowApp.make_slide_job(app, "url3", "Video3", "/tmp")
