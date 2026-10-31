@@ -47,9 +47,14 @@ or the separate transcription actions. CLI: `--end-time 1:30:00`.
 Starting with 2.8.0, SlideFlow checks the latest stable GitHub release once at
 launch. Click the version button at the bottom of the sidebar to check again.
 When a newer version is available, click **Cập nhật**, then confirm. SlideFlow
+shows a progress window with percentage and downloaded MB, then
 downloads the DMG, checks its SHA-256 against GitHub's asset digest, verifies
 the bundle identifier, version, arm64 binary and code signature, and restarts
-after replacing the app. Active extraction jobs must finish first.
+after replacing the app. The window shows download, verification and
+installation phases; it reports when the network stops supplying data. Cancel
+while downloading/preparing to retain the current app and remove temporary
+files. A pending network read may take up to 30 seconds to respond to cancellation.
+Active extraction jobs must finish first.
 
 The updater needs write access to the app's containing directory. Install in
 `~/Applications` if `/Applications` requires an administrator. A failed download

@@ -154,6 +154,12 @@ inputs, and 6px for small tags.
 
 ## Components
 
+- **Update window:** open a modal progress window immediately after update
+  confirmation. Show real downloaded MB and percent, then distinct verification
+  and installation states. Show network waiting explicitly. Allow cancellation
+  before replacement. Coalesce worker events into one queued value; run only
+  one UI polling timer, and cancel all progress timers when closing.
+
 - **Native title bar:** on macOS, request Tk's per-window dark appearance
   so the native title bar matches the dark content without changing the
   system appearance. Preserve the native window controls.

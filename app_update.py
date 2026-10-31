@@ -10,8 +10,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -76,18 +78,46 @@ def check_release() -> Release | None:
     return parse_release(json.loads(payload))
 
 
-def download_release(release: Release, target: Path) -> None:
+class UpdateCancelled(Exception):
+    """A requested cancellation; the current app is kept intact."""
+
+
+UpdateProgress = Callable[[str, int, int], None]
+
+
+def check_update_cancelled(cancel: threading.Event | None) -> None:
+    if cancel is not None and cancel.is_set():
+        raise UpdateCancelled("Đã hủy cập nhật.")
+
+
+def download_release(
+    release: Release, target: Path,
+    progress: UpdateProgress | None = None,
+    cancel: threading.Event | None = None,
+) -> None:
     checksum = hashlib.sha256()
     total = 0
     try:
+        check_update_cancelled(cancel)
+        if progress:
+            progress("download", 0, release.size)
         request = Request(release.url, headers={"User-Agent": f"SlideFlow/{APP_VERSION}"})
         with urlopen(request, timeout=30) as response, target.open("wb") as output:
-            while block := response.read(1024 * 1024):
+            while True:
+                check_update_cancelled(cancel)
+                block = response.read(256 * 1024)
+                check_update_cancelled(cancel)
+                if not block:
+                    break
                 total += len(block)
                 if total > release.size or total > MAX_DOWNLOAD:
                     raise ValueError("Tệp cập nhật vượt quá dung lượng công bố.")
                 checksum.update(block)
                 output.write(block)
+                if progress:
+                    progress("download", total, release.size)
+        if progress:
+            progress("verify", total, release.size)
         if total != release.size or checksum.hexdigest() != release.digest:
             raise ValueError("Tệp cập nhật bị thiếu hoặc sai mã SHA-256.")
     except BaseException:
@@ -111,8 +141,12 @@ def verify_bundle(path: Path, version: str) -> None:
     subprocess.run(["/usr/bin/lipo", "-verify_arch", "arm64", str(path / "Contents/MacOS/SlideFlow")], check=True, capture_output=True, timeout=15)
 
 
-def prepare_update(release: Release, destination: Path) -> Path:
+def prepare_update(
+    release: Release, destination: Path,
+    progress: UpdateProgress | None = None, cancel: threading.Event | None = None,
+) -> Path:
     """Download and stage on the destination volume; clean every failure path."""
+    check_update_cancelled(cancel)
     if not os.access(destination.parent, os.W_OK):
         raise PermissionError("Không có quyền ghi. Chuyển SlideFlow vào thư mục Applications của bạn rồi thử lại.")
     stage = Path(tempfile.mkdtemp(prefix=".slideflow-update-", dir=destination.parent))
@@ -121,17 +155,30 @@ def prepare_update(release: Release, destination: Path) -> Path:
             root = Path(temporary)
             dmg, mount = root / "SlideFlow.dmg", root / "volume"
             mount.mkdir()
-            download_release(release, dmg)
+            download_release(release, dmg, progress=progress, cancel=cancel)
+            check_update_cancelled(cancel)
+            if progress:
+                progress("prepare", release.size, release.size)
             try:
                 subprocess.run(["/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(dmg)], check=True, capture_output=True, timeout=120)
+                check_update_cancelled(cancel)
                 candidate = mount / "SlideFlow.app"
+                if progress:
+                    progress("verify", release.size, release.size)
                 verify_bundle(candidate, release.version)
+                check_update_cancelled(cancel)
+                if progress:
+                    progress("copy", release.size, release.size)
                 subprocess.run(["/usr/bin/ditto", str(candidate), str(stage / "SlideFlow.app")], check=True, capture_output=True, timeout=180)
+                check_update_cancelled(cancel)
                 verify_bundle(stage / "SlideFlow.app", release.version)
             finally:
                 detached = subprocess.run(["/usr/bin/hdiutil", "detach", str(mount)], capture_output=True, timeout=60)
                 if detached.returncode and os.path.ismount(mount):
                     subprocess.run(["/usr/bin/hdiutil", "detach", "-force", str(mount)], check=True, capture_output=True, timeout=60)
+        check_update_cancelled(cancel)
+        if progress:
+            progress("ready", release.size, release.size)
         return stage
     except BaseException:
         shutil.rmtree(stage, ignore_errors=True)

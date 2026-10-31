@@ -16,6 +16,7 @@ from PIL import Image
 
 import app_update
 from app_version import APP_VERSION
+from update_dialog import UpdateProgressDialog
 
 from online_extractor import ExtractionResult, OnlineSlideExtractor, PlaylistResult, PlaylistVideo, parse_end_time
 from slide_history import SlideHistoryStore
@@ -451,6 +452,8 @@ class SlideFlowApp(ctk.CTk):
             messagebox.showinfo("Cập nhật", f"SlideFlow {APP_VERSION} đang là phiên bản mới nhất.")
 
     def on_update_click(self) -> None:
+        if self.update_installing:
+            return
         if self.update_release is None:
             self.check_app_update(manual=True)
             return
@@ -469,10 +472,15 @@ class SlideFlowApp(ctk.CTk):
         self.script_button.configure(state="disabled")
         self.audio_script_button.configure(state="disabled")
         release = self.update_release
+        self.update_dialog = UpdateProgressDialog(self, release.version)
+        self.update_cancel = self.update_dialog.cancel_event
 
         def prepare() -> None:
             try:
-                stage = app_update.prepare_update(release, destination)
+                stage = app_update.prepare_update(
+                    release, destination, progress=self.update_dialog.post_progress,
+                    cancel=self.update_cancel,
+                )
             except Exception as error:
                 self.after(0, self.finish_app_update, None, destination, str(error))
             else:
@@ -481,22 +489,36 @@ class SlideFlowApp(ctk.CTk):
         threading.Thread(target=prepare, daemon=False).start()
 
     def finish_app_update(self, stage, destination, error) -> None:
+        cancelled = self.update_cancel.is_set()
+        if cancelled:
+            if stage is not None:
+                shutil.rmtree(stage, ignore_errors=True)
+            error = "Đã hủy cập nhật."
         if error is None:
+            self.update_dialog.show_installing()
             try:
                 app_update.launch_installer(stage, destination)
             except Exception as failure:
                 shutil.rmtree(stage, ignore_errors=True)
                 error = str(failure)
             else:
+                self.update_dialog.destroy()
+                self.update_dialog = None
                 self.update_installing = False
                 self.quit_application()
                 return
+        self.update_dialog.destroy()
+        self.update_dialog = None
         self.update_installing = False
-        self.update_button.configure(text="Thử cập nhật lại", state="normal")
+        self.update_button.configure(
+            text=f"Cập nhật {self.update_release.version}" if cancelled else "Thử cập nhật lại",
+            state="normal",
+        )
         self.update_slide_start_button()
         self.script_button.configure(state="normal")
         self.audio_script_button.configure(state="normal")
-        messagebox.showerror("Không cập nhật được", error)
+        if not cancelled:
+            messagebox.showerror("Không cập nhật được", error)
 
     def sidebar_group(self, sidebar, row: int, title: str, note: str = "") -> ctk.CTkFrame:
         group = ctk.CTkFrame(sidebar, fg_color="transparent")

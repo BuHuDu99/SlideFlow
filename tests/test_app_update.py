@@ -4,6 +4,7 @@ import json
 import plistlib
 import os
 import subprocess
+import threading
 import tempfile
 import unittest
 from pathlib import Path
@@ -53,6 +54,52 @@ class UpdateTests(unittest.TestCase):
             with patch.object(updater, "urlopen", return_value=io.BytesIO(b"expected")):
                 updater.download_release(release, target)
                 self.assertEqual(target.read_bytes(), b"expected")
+
+    def test_download_reports_actual_byte_progress(self):
+        content = b"x" * (600 * 1024)
+        release = updater.parse_release(payload(content=content))
+        events = []
+        with tempfile.TemporaryDirectory() as root:
+            with patch.object(updater, "urlopen", return_value=io.BytesIO(content)):
+                updater.download_release(release, Path(root)/"update.dmg", progress=lambda *event: events.append(event))
+        downloads = [event for event in events if event[0]=="download"]
+        self.assertEqual(downloads[0], ("download", 0, len(content)))
+        self.assertEqual(downloads[-1], ("download", len(content), len(content)))
+        self.assertEqual([e[1] for e in downloads], sorted(e[1] for e in downloads))
+        self.assertEqual(events[-1][0], "verify")
+
+    def test_cancel_download_deletes_partial_file(self):
+        content = b"x" * (600 * 1024)
+        release = updater.parse_release(payload(content=content))
+        cancel = threading.Event()
+        def progress(phase, count, total):
+            if phase=="download" and count:
+                cancel.set()
+        with tempfile.TemporaryDirectory() as root:
+            target = Path(root)/"update.dmg"
+            with patch.object(updater, "urlopen", return_value=io.BytesIO(content)):
+                with self.assertRaises(updater.UpdateCancelled):
+                    updater.download_release(release, target, progress=progress, cancel=cancel)
+            self.assertFalse(target.exists())
+
+    def test_cancel_before_download_never_connects(self):
+        cancel = threading.Event(); cancel.set()
+        with tempfile.TemporaryDirectory() as root, patch.object(updater, "urlopen") as fetch:
+            with self.assertRaises(updater.UpdateCancelled):
+                updater.download_release(updater.parse_release(payload()), Path(root)/"update.dmg", cancel=cancel)
+            fetch.assert_not_called()
+
+    def test_cancel_after_download_cleans_stage_before_mounting(self):
+        cancel = threading.Event()
+        with tempfile.TemporaryDirectory() as root:
+            def download(release, target, **kwargs):
+                target.write_bytes(b"dmg")
+                cancel.set()
+            with patch.object(updater, "download_release", side_effect=download), patch.object(updater.subprocess, "run") as run:
+                with self.assertRaises(updater.UpdateCancelled):
+                    updater.prepare_update(updater.parse_release(payload()), Path(root)/"SlideFlow.app", cancel=cancel)
+                run.assert_not_called()
+            self.assertEqual(list(Path(root).iterdir()), [])
 
     def test_bundle_identity_and_version_checked_before_execution(self):
         with tempfile.TemporaryDirectory() as root:
