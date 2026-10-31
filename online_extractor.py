@@ -70,20 +70,31 @@ class SavedFrame:
 
 
 def parse_end_time(value: str) -> Optional[float]:
-    """Accept hh:mm:ss or mm:ss, with a blank field meaning the full video."""
+    """Read hours:minutes[:seconds]; blank or all-zero means the full video."""
     value = value.strip()
     if not value:
         return None
     parts = value.split(":")
     if len(parts) not in (2, 3) or any(not re.fullmatch(r"[0-9]+", part) for part in parts):
-        raise ValueError("Nhập thời gian dạng hh:mm:ss hoặc mm:ss, ví dụ 1:30:00 hoặc 90:00.")
+        raise ValueError("Nhập giờ:phút hoặc giờ:phút:giây, ví dụ 02:10 hoặc 02:10:00.")
     numbers = list(map(int, parts))
-    if numbers[-1] >= 60 or (len(numbers) == 3 and numbers[-2] >= 60):
-        raise ValueError("Giây và phút trong hh:mm:ss phải nhỏ hơn 60.")
-    seconds = sum(number * 60 ** index for index, number in enumerate(reversed(numbers)))
-    if seconds <= 0 or seconds > 365 * 24 * 3600:
-        raise ValueError("Mốc kết thúc phải lớn hơn 0 và không vượt quá 365 ngày.")
-    return float(seconds)
+    if len(numbers) == 2:
+        numbers.append(0)
+    hours, minutes, seconds = numbers
+    if minutes >= 60 or seconds >= 60:
+        raise ValueError("Phút và giây phải nhỏ hơn 60.")
+    total = hours * 3600 + minutes * 60 + seconds
+    if total > 365 * 24 * 3600:
+        raise ValueError("Mốc kết thúc không được vượt quá 365 ngày.")
+    return float(total) if total else None
+
+
+def normalize_end_time(value: str) -> str:
+    """Complete omitted seconds and display a minimum of two digits per field."""
+    total = int(parse_end_time(value) or 0)
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 class OnlineSlideExtractor:
@@ -774,7 +785,7 @@ def main() -> None:
     parser.add_argument("url", help="YouTube video URL")
     parser.add_argument("--output", default=str(Path.home() / "Documents" / "SlideFlow"))
     parser.add_argument("--interval", type=int, default=8)
-    parser.add_argument("--end-time", type=parse_end_time, default=None, help="Stop slide scanning at hh:mm:ss or mm:ss")
+    parser.add_argument("--end-time", type=parse_end_time, default=None, help="Stop slide scanning at hours:minutes[:seconds]; 00:00:00 scans the full video")
     parser.add_argument("--threshold", type=float, default=0.90)
     parser.add_argument("--quality", type=int, default=1080)
     parser.add_argument("--no-transcript", action="store_true")

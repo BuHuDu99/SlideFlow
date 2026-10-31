@@ -30,17 +30,21 @@ expected bundle before removing quarantine metadata; it does not disable Gatekee
 
 ## Stop slide scanning early
 
-Enter **Kết thúc quét** as `hh:mm:ss` or `mm:ss` before adding a video to
-its queue. For example, `1:30:00` (or `90:00`) scans only the first 90 minutes
-of a two-hour video. Leave it blank or click **Toàn bộ video** to scan all of
-it. A limit beyond the actual video length is clamped to the video length.
-Each queued job retains its own limit. In the playlist dialog every video
-has an independent end-time field, initially blank. **Áp dụng mốc kết thúc
-cho tất cả** is off by default; enabling it uses the shared field for selected
-videos. Disabling it restores the individual fields without clearing them.
-A blank shared or individual field means the full video. The result reports the scanned duration.
-This limit applies to slide sampling, not the optional full subtitle file
-or the separate transcription actions. CLI: `--end-time 1:30:00`.
+**Kết thúc quét** defaults to `00:00:00`, meaning the full video. Enter
+hours:minutes or hours:minutes:seconds: `02:10` means two hours and ten
+minutes and automatically becomes `02:10:00` on leaving the field or pressing
+Enter. For 90 minutes, enter `01:30` or `01:30:00`; for 45 minutes use `00:45`.
+Blank fields also normalize to `00:00:00`. **Toàn bộ video** resets to zero.
+
+Each playlist video has its own default-zero field. **Áp dụng mốc kết thúc
+cho tất cả** is off by default; when enabled the shared field overrides the
+individual fields for selected videos. Toggling it off preserves the individual
+values. A zero shared field means scan all selected videos in full. Each queued
+job retains its own limit. Limits beyond the actual duration are clamped.
+
+The result reports the scanned duration. This setting applies to slide sampling,
+not optional subtitle files or the separate transcription actions. CLI:
+`--end-time 02:10` (hours:minutes) or `--end-time 02:10:00`.
 
 ## Updates in the app
 

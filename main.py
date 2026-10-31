@@ -18,7 +18,7 @@ import app_update
 from app_version import APP_VERSION
 from update_dialog import UpdateProgressDialog
 
-from online_extractor import ExtractionResult, OnlineSlideExtractor, PlaylistResult, PlaylistVideo, parse_end_time
+from online_extractor import ExtractionResult, OnlineSlideExtractor, PlaylistResult, PlaylistVideo, parse_end_time, normalize_end_time
 from slide_history import SlideHistoryStore
 from slide_queue import SequentialSlideQueue, SlideQueueJob
 from slideflow_ipc import LocalIPCServer
@@ -134,7 +134,7 @@ class SlideFlowApp(ctk.CTk):
         self.custom_interval_var = ctk.IntVar(value=7)
         self.custom_threshold_var = ctk.DoubleVar(value=0.92)
         self.quality_var = ctk.StringVar(value="1080p")
-        self.end_time_var = ctk.StringVar(value="")
+        self.end_time_var = ctk.StringVar(value="00:00:00")
         self.transcript_var = ctk.BooleanVar(value=True)
         self.cookie_browser_var = ctk.StringVar(value="Chrome")
         with Image.open(self.resource_path("assets/SlideFlowToolbar.png")) as icon:
@@ -594,11 +594,12 @@ class SlideFlowApp(ctk.CTk):
             border_color=self.BORDER, text_color=self.TEXT,
         )
         self.end_time_entry.grid(row=0, column=1)
+        self.bind_time_field(self.end_time_var, self.end_time_entry)
         ctk.CTkButton(
             range_row, text="Toàn bộ video", width=106, height=30,
             fg_color="transparent", hover_color=self.SURFACE,
             text_color=self.MUTED, font=ctk.CTkFont(size=12),
-            command=lambda: self.end_time_var.set(""),
+            command=self.reset_end_time,
         ).grid(row=0, column=2, padx=(6, 0))
 
         actions = ctk.CTkFrame(composer, fg_color="transparent")
@@ -626,6 +627,30 @@ class SlideFlowApp(ctk.CTk):
             command=self.start_extraction,
         )
         self.start_button.grid(row=0, column=3, sticky="e", padx=(12, 0))
+
+    def normalize_time_field(self, variable, entry, *, strict: bool = False) -> None:
+        try:
+            normalized = normalize_end_time(variable.get())
+        except ValueError:
+            entry.configure(border_color=self.DANGER_TEXT)
+            if strict:
+                raise
+        else:
+            variable.set(normalized)
+            entry.configure(border_color=self.BORDER)
+
+    def bind_time_field(self, variable, entry) -> None:
+        # Normalize after editing, never while the user is still typing.
+        entry.bind("<FocusOut>", lambda _event: self.normalize_time_field(variable, entry), add="+")
+        def complete(_event):
+            self.normalize_time_field(variable, entry)
+            return "break"
+
+        entry.bind("<Return>", complete, add="+")
+
+    def reset_end_time(self) -> None:
+        self.end_time_var.set("00:00:00")
+        self.end_time_entry.configure(border_color=self.BORDER)
 
     def build_status_card(self, body) -> None:
         self.action_card = self.card(body)
@@ -1266,7 +1291,7 @@ class SlideFlowApp(ctk.CTk):
             return
         if not self.is_playlist_url(url):
             try:
-                parse_end_time(self.end_time_var.get())
+                self.normalize_time_field(self.end_time_var, self.end_time_entry, strict=True)
             except ValueError as error:
                 messagebox.showerror("Mốc kết thúc chưa đúng", str(error))
                 self.end_time_entry.focus_set()
@@ -1391,8 +1416,9 @@ class SlideFlowApp(ctk.CTk):
             text_color=self.TEXT,
         )
         shared_entry.grid(row=0, column=1)
+        self.bind_time_field(shared_value, shared_entry)
         ctk.CTkLabel(
-            time_controls, text="hh:mm:ss · trống = hết video", text_color=self.MUTED,
+            time_controls, text="00:00:00 = quét hết video", text_color=self.MUTED,
             font=ctk.CTkFont(size=11),
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
@@ -1456,7 +1482,7 @@ class SlideFlowApp(ctk.CTk):
                 anchor="w",
             ).grid(row=1, column=1, sticky="ew", padx=(0, 12), pady=(0, 10))
 
-            time_value = ctk.StringVar(master=dialog, value="")
+            time_value = ctk.StringVar(master=dialog, value="00:00:00")
             ctk.CTkLabel(
                 row, text="Kết thúc quét", text_color=self.MUTED,
                 font=ctk.CTkFont(size=11),
@@ -1466,6 +1492,7 @@ class SlideFlowApp(ctk.CTk):
                 fg_color=self.INPUT_BG, border_color=self.BORDER, text_color=self.TEXT,
             )
             time_entry.grid(row=1, column=2, sticky="e", padx=(0, 14), pady=(2, 10))
+            self.bind_time_field(time_value, time_entry)
             time_fields[video.position] = (time_value, time_entry)
 
         def toggle_shared_time() -> None:
@@ -1529,6 +1556,11 @@ class SlideFlowApp(ctk.CTk):
             for video in selected_videos:
                 value, entry = time_fields[video.position]
                 try:
+                    self.normalize_time_field(
+                        shared_value if shared_enabled.get() else value,
+                        shared_entry if shared_enabled.get() else entry,
+                        strict=True,
+                    )
                     jobs.append(self.make_slide_job(
                         video.url, video.title, output,
                         end_time_text=shared_value.get() if shared_enabled.get() else value.get(),

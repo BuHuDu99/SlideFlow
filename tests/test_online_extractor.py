@@ -10,7 +10,7 @@ import numpy as np
 import yt_dlp
 
 from main import SlideFlowApp
-from online_extractor import OnlineSlideExtractor, parse_end_time
+from online_extractor import OnlineSlideExtractor, parse_end_time, normalize_end_time
 
 
 class FakeOnlineExtractor(OnlineSlideExtractor):
@@ -58,12 +58,27 @@ class MostlyFailingExtractor(FakeOnlineExtractor):
 class OnlineExtractorTests(unittest.TestCase):
     def test_end_time_input_formats(self):
         self.assertIsNone(parse_end_time("  "))
-        for value in ("1:30:00", "90:00", "01:30:00"):
+        for value in ("1:30:00", "01:30", "01:30:00"):
             self.assertEqual(parse_end_time(value), 5400)
-        self.assertEqual(parse_end_time("0:01"), 1)
-        for value in ("0:00", "-1:00", "1:60:00", "1:99", "abc", "90", "1:30:00:00", "nan"):
+        self.assertEqual(parse_end_time("02:10"), 7800)
+        self.assertEqual(parse_end_time("00:01"), 60)
+        self.assertEqual(parse_end_time("00:00:01"), 1)
+        for value in ("00:00:00", "0:00", "00:00"):
+            self.assertIsNone(parse_end_time(value))
+        for value in ( "-1:00", "1:60:00", "1:99", "abc", "90", "1:30:00:00", "nan"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_end_time(value)
+
+    def test_end_time_display_is_completed_without_changing_meaning(self):
+        for raw, expected in (("02:10", "02:10:00"), ("2:10", "02:10:00"),
+                              ("00:45", "00:45:00"), ("1:2:3", "01:02:03"),
+                              ("", "00:00:00"), ("0:00", "00:00:00"),
+                              ("00:00:00", "00:00:00")):
+            with self.subTest(raw=raw):
+                self.assertEqual(normalize_end_time(raw), expected)
+                self.assertEqual(parse_end_time(raw), parse_end_time(expected))
+        with self.assertRaises(ValueError):
+            normalize_end_time("02:99")
 
     def test_queue_captures_end_time_without_affecting_existing_jobs(self):
         state = {"end": "1:30:00"}
@@ -84,7 +99,7 @@ class OnlineExtractorTests(unittest.TestCase):
         # Explicit playlist fields override the main field, including blanks.
         state["end"] = "bad"
         blank = SlideFlowApp.make_slide_job(app, "url3", "Video3", "/tmp", end_time_text="")
-        custom = SlideFlowApp.make_slide_job(app, "url4", "Video4", "/tmp", end_time_text="45:00")
+        custom = SlideFlowApp.make_slide_job(app, "url4", "Video4", "/tmp", end_time_text="00:45:00")
         self.assertIsNone(blank.end_time)
         self.assertEqual(custom.end_time, 2700)
         state["end"] = "bad"
