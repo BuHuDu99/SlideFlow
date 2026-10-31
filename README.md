@@ -29,6 +29,54 @@ macOS may therefore require the verification step documented in
 [`prepare_local_app.command`](prepare_local_app.command). The script verifies the
 expected bundle before removing quarantine metadata; it does not disable Gatekeeper.
 
+## Stop slide scanning early
+
+**Kết thúc quét** defaults to `00:00:00`, meaning the full video. Enter
+hours:minutes or hours:minutes:seconds: `02:10` means two hours and ten
+minutes and automatically becomes `02:10:00` on leaving the field or pressing
+Enter. For 90 minutes, enter `01:30` or `01:30:00`; for 45 minutes use `00:45`.
+Blank fields also normalize to `00:00:00`. **Toàn bộ video** resets to zero.
+
+Each playlist video has its own default-zero field. **Áp dụng mốc kết thúc
+cho tất cả** is off by default; when enabled the shared field overrides the
+individual fields for selected videos. Toggling it off preserves the individual
+values. A zero shared field means scan all selected videos in full. Each queued
+job retains its own limit. Limits beyond the actual duration are clamped.
+
+The result reports the scanned duration. This setting applies to slide sampling,
+not optional subtitle files or the separate transcription actions. CLI:
+`--end-time 02:10` (hours:minutes) or `--end-time 02:10:00`.
+
+## Updates in the app
+
+Starting with 2.8.0, SlideFlow checks the latest stable GitHub release once at
+launch. Click the version button at the bottom of the sidebar to check again.
+When a newer version is available, click **Cập nhật**, then confirm. SlideFlow
+shows a progress window with percentage and downloaded MB, then
+downloads the DMG, checks its SHA-256 against GitHub's asset digest, verifies
+the bundle identifier, version, arm64 binary and code signature, and restarts
+after replacing the app. The window shows download, verification and
+installation phases; it reports when the network stops supplying data. Cancel
+while downloading/preparing to retain the current app and remove temporary
+files. A pending network read may take up to 30 seconds to respond to cancellation.
+Active extraction jobs must finish first.
+
+The updater needs write access to the app's containing directory. Install in
+`~/Applications` if `/Applications` requires an administrator. A failed download
+leaves the current app intact; a failed replacement restores the old app.
+Temporary downloads, mounted volumes and staging copies are removed after the
+operation. User history, models and generated files stay outside the app bundle.
+
+Devices running 2.7.3 must install 2.8.0 manually once. That older application
+does not contain an updater and cannot acquire this feature remotely by itself.
+This build supports Apple Silicon Macs only.
+
+To publish a new update, change `APP_VERSION` in `app_version.py`, commit and
+push the source, then run `./scripts/publish_release.command` with the packaging
+environment installed. It builds and uploads `SlideFlow.dmg` as a stable release
+tagged with that version; GitHub supplies the SHA-256 asset digest. Do not reuse
+a published version number. Prereleases and drafts are not offered in the app.
+
 ## Run from source
 
 Requirements:

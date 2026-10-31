@@ -10,7 +10,7 @@ import numpy as np
 import yt_dlp
 
 from main import SlideFlowApp
-from online_extractor import OnlineSlideExtractor
+from online_extractor import OnlineSlideExtractor, parse_end_time, normalize_end_time
 
 
 class FakeOnlineExtractor(OnlineSlideExtractor):
@@ -56,6 +56,93 @@ class MostlyFailingExtractor(FakeOnlineExtractor):
 
 
 class OnlineExtractorTests(unittest.TestCase):
+    def test_end_time_input_formats(self):
+        self.assertIsNone(parse_end_time("  "))
+        for value in ("1:30:00", "01:30", "01:30:00"):
+            self.assertEqual(parse_end_time(value), 5400)
+        self.assertEqual(parse_end_time("02:10"), 7800)
+        self.assertEqual(parse_end_time("00:01"), 60)
+        self.assertEqual(parse_end_time("00:00:01"), 1)
+        for value in ("00:00:00", "0:00", "00:00"):
+            self.assertIsNone(parse_end_time(value))
+        for value in ( "-1:00", "1:60:00", "1:99", "abc", "90", "1:30:00:00", "nan"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_end_time(value)
+
+    def test_end_time_display_is_completed_without_changing_meaning(self):
+        for raw, expected in (("02:10", "02:10:00"), ("2:10", "02:10:00"),
+                              ("00:45", "00:45:00"), ("1:2:3", "01:02:03"),
+                              ("", "00:00:00"), ("0:00", "00:00:00"),
+                              ("00:00:00", "00:00:00")):
+            with self.subTest(raw=raw):
+                self.assertEqual(normalize_end_time(raw), expected)
+                self.assertEqual(parse_end_time(raw), parse_end_time(expected))
+        with self.assertRaises(ValueError):
+            normalize_end_time("02:99")
+
+    def test_queue_captures_end_time_without_affecting_existing_jobs(self):
+        state = {"end": "1:30:00"}
+        variable = lambda value: SimpleNamespace(get=lambda: value)
+        app = SimpleNamespace(
+            processing_settings=SlideFlowApp.processing_settings,
+            preset_var=variable("Cân bằng"), custom_interval_var=variable(7),
+            custom_threshold_var=variable(0.92), quality_var=variable("1080p"),
+            transcript_var=variable(True), cookie_browser_var=variable("Chrome"),
+            COOKIE_BROWSER_OPTIONS=SlideFlowApp.COOKIE_BROWSER_OPTIONS,
+            end_time_var=SimpleNamespace(get=lambda: state["end"]),
+        )
+        first = SlideFlowApp.make_slide_job(app, "url", "Video", "/tmp")
+        state["end"] = ""
+        second = SlideFlowApp.make_slide_job(app, "url2", "Video2", "/tmp")
+        self.assertEqual(first.end_time, 5400)
+        self.assertIsNone(second.end_time)
+        # Explicit playlist fields override the main field, including blanks.
+        state["end"] = "bad"
+        blank = SlideFlowApp.make_slide_job(app, "url3", "Video3", "/tmp", end_time_text="")
+        custom = SlideFlowApp.make_slide_job(app, "url4", "Video4", "/tmp", end_time_text="00:45:00")
+        self.assertIsNone(blank.end_time)
+        self.assertEqual(custom.end_time, 2700)
+        state["end"] = "bad"
+        with self.assertRaises(ValueError):
+            SlideFlowApp.make_slide_job(app, "url3", "Video3", "/tmp")
+
+    def test_end_time_rejects_invalid_numeric_limits(self):
+        for value in (0, -1, float("nan"), float("inf")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                OnlineSlideExtractor("url", "/tmp", end_time=value)
+
+    def test_two_hour_video_stops_fetching_at_ninety_minutes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            extractor = FakeOnlineExtractor("url", folder, interval=60, end_time=5400, save_transcript=False)
+            info = extractor.resolve_video(); info["duration"] = 7200
+            sampled = []
+            original = extractor.fetch_frame
+            def fetch(url, headers, timestamp):
+                sampled.append(timestamp)
+                return original(url, headers, timestamp)
+            with patch.object(extractor, "resolve_video", return_value=info), patch.object(extractor, "fetch_frame", side_effect=fetch):
+                result = extractor.extract()
+            self.assertEqual(result.duration, 5400)
+            self.assertEqual(result.sampled_count, 90)
+            self.assertTrue(all(value < 5400 for value in sampled))
+            self.assertTrue(Path(result.pdf_path).is_file())
+            self.assertFalse((Path(result.output_dir) / "slides").exists())
+
+    def test_end_time_beyond_duration_and_short_limits(self):
+        for limit, expected_duration, count in ((None, 12, 6), (999, 12, 6), (0.1, 0.1, 1), (0.5, 0.5, 1)):
+            with self.subTest(limit=limit), tempfile.TemporaryDirectory() as folder:
+                extractor = FakeOnlineExtractor("url", folder, interval=2, end_time=limit, save_transcript=False)
+                sampled = []
+                original = extractor.fetch_frame
+                def fetch(url, headers, timestamp):
+                    sampled.append(timestamp)
+                    return original(url, headers, timestamp)
+                with patch.object(extractor, "fetch_frame", side_effect=fetch):
+                    result = extractor.extract()
+                self.assertEqual(result.duration, expected_duration)
+                self.assertEqual(result.sampled_count, count)
+                self.assertTrue(all(value < expected_duration for value in sampled))
+
     @staticmethod
     def lecture_slide(second_line: str) -> np.ndarray:
         frame = np.full((720, 1280, 3), 248, dtype=np.uint8)
